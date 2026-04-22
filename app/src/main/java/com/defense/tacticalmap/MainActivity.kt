@@ -8,9 +8,18 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import android.graphics.Color
 import org.maplibre.android.MapLibre
+import org.maplibre.android.maps.MapboxMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.LineString
+import org.maplibre.geojson.Point
 import org.vosk.Model
 import org.vosk.Recognizer
 import org.vosk.android.RecognitionListener
@@ -23,6 +32,7 @@ import java.io.IOException
 class MainActivity : AppCompatActivity(), RecognitionListener {
 
     private lateinit var mapView: MapView
+    private var mapboxMap: MapboxMap? = null
     private lateinit var statusText: TextView
     private lateinit var transcriptionText: TextView
     private val TAG = "OfflineTacticalMap"
@@ -68,6 +78,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     private fun initializeMap() {
         mapView.getMapAsync { mapboxMap ->
+            this.mapboxMap = mapboxMap
             statusText.text = "Map Ready, Loading offline style..."
             try {
                 val mbtilesPath = copyAssetToCache("mbtiles/sample_tactical.mbtiles")
@@ -137,7 +148,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                         val routeCoords = routingEngine.calculateRoute(46.498295, 11.354758, 46.501, 11.360)
                         if (routeCoords != null) {
                             transcriptionText.text = "Route calculated! Target: ${intent.entity}"
-                            // Normally we would pass routeCoords to MapLibre GeoJsonSource
+                            drawRouteOnMap(routeCoords)
                         } else {
                             transcriptionText.text = "Route calculation failed. Ensure .gh map exists."
                         }
@@ -175,6 +186,26 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     override fun onTimeout() {
         speechService?.startListening(this)
+    }
+
+    private fun drawRouteOnMap(routeCoords: List<DoubleArray>) {
+        mapboxMap?.getStyle { style ->
+            val points = routeCoords.map { Point.fromLngLat(it[0], it[1]) }
+            val lineString = LineString.fromLngLats(points)
+            val feature = Feature.fromGeometry(lineString)
+            val featureCollection = FeatureCollection.fromFeatures(arrayOf(feature))
+            
+            val source = style.getSourceAs<GeoJsonSource>("tactical-route-source")
+            if (source != null) {
+                source.setGeoJson(featureCollection)
+            } else {
+                style.addSource(GeoJsonSource("tactical-route-source", featureCollection))
+                style.addLayer(LineLayer("tactical-route-layer", "tactical-route-source").withProperties(
+                    PropertyFactory.lineWidth(5f),
+                    PropertyFactory.lineColor(Color.RED)
+                ))
+            }
+        }
     }
 
     // --- Utility Methods for Offline Map ---
