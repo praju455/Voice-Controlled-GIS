@@ -52,6 +52,10 @@ dependencies {
     // MapLibre Native
     implementation("org.maplibre.gl:android-sdk:10.2.0")
     
+    // Vosk Offline Speech Recognition
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
+    implementation("com.alphacep:vosk-android:0.3.32@aar")
+    
     // LeakCanary for memory profiling (debug only)
     debugImplementation("com.squareup.leakcanary:leakcanary-android:2.13")
 }
