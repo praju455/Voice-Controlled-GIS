@@ -38,6 +38,37 @@ Every component in this stack was exclusively chosen because it operates entirel
 3. **GraphHopper** uses Contraction Hierarchies over the offline `.gh` dataset to instantly generate coordinate paths.
 4. **MapLibre** intercepts those raw coordinates, converts them to a GeoJSON `LineLayer`, and paints a bright tactical track across the offline map.
 
+### 🏛️ System Architecture Diagram
+
+```mermaid
+graph TD
+    %% Input Layer
+    Operator((Operator Voice)) -->|Microphone| Vosk[Vosk API]
+    
+    %% Processing Layer
+    subgraph Offline Engine
+        Vosk -->|Text String| SpatialEngine[Spatial Intelligence Engine]
+        SpatialEngine -->|Route Intent| TacticalRouter[Tactical Router Engine]
+        SpatialEngine -->|Buffer Intent| SpatiaLite[(SpatiaLite SQLite)]
+        
+        %% Core Routing Math
+        TacticalRouter <-->|Query Contraction Hierarchies| GraphHopper[(GraphHopper .gh Cache)]
+        TacticalRouter -->|LineString Coordinates| MapLibre[MapLibre Native]
+    end
+    
+    %% Presentation Layer
+    MBTiles[(mbtiles Raster)] -->|Tiles| MapLibre
+    MapLibre -->|GeoJSON Overlay| Display((Device Screen))
+
+    classDef hardware fill:#2B3A42,stroke:#3F5D7D,stroke-width:2px,color:#fff;
+    classDef software fill:#3F5D7D,stroke:#6699CC,stroke-width:2px,color:#fff;
+    classDef database fill:#1A252C,stroke:#00A86B,stroke-width:2px,color:#fff;
+
+    class Operator,Display hardware;
+    class Vosk,SpatialEngine,TacticalRouter,MapLibre software;
+    class GraphHopper,SpatiaLite,MBTiles database;
+```
+
 ---
 
 ## 🚀 Setup & Installation Guide
