@@ -37,21 +37,28 @@ class SpatialIntelligenceEngine(private val context: Context) {
     fun parseCommand(voiceInput: String): TacticalIntent? {
         val lowerInput = voiceInput.lowercase()
 
-        // 1. Deterministic Regex Parsing
-        // Example: "display vehicles within 5 kilometers"
-        val regex = Regex("(show|display|identify)\\s+(hostiles|friendlies|vehicles)\\s+(in|within)\\s+(\\d+)\\s+(kilometers|km|meters|m)")
-        val match = regex.find(lowerInput)
+        val regexBuffer = Regex("(show|display|identify)\\s+(hostiles|friendlies|vehicles)\\s+(in|within)\\s+(\\d+)\\s+(kilometers|km|meters|m)")
+        val matchBuffer = regexBuffer.find(lowerInput)
 
-        if (match != null) {
-            val (actionStr, entityStr, _, distStr, unitStr) = match.destructured
+        if (matchBuffer != null) {
+            val (actionStr, entityStr, _, distStr, unitStr) = matchBuffer.destructured
             val intent = TacticalIntent(
                 action = actionStr,
                 entity = entityStr,
                 distance = distStr.toIntOrNull() ?: 0,
                 unit = unitStr
             )
-            Log.i(TAG, "Regex parsed intent successfully: $intent")
+            Log.i(TAG, "Regex parsed buffer intent successfully: $intent")
             return intent
+        }
+        
+        // 1b. Routing Regex
+        // Example: "route to base" or "calculate path to objective"
+        val regexRoute = Regex("(route|path|navigate)\\s+to\\s+(base|objective|extraction)")
+        val matchRoute = regexRoute.find(lowerInput)
+        if (matchRoute != null) {
+            val (actionStr, targetStr) = matchRoute.destructured
+            return TacticalIntent(action = "route", entity = targetStr, distance = 0, unit = "")
         }
 
         // 2. Fallback to Snips TFLite NLClassifier

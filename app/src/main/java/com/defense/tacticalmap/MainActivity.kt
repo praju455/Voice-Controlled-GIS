@@ -30,6 +30,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private var speechService: SpeechService? = null
     private var model: Model? = null
     private lateinit var spatialEngine: SpatialIntelligenceEngine
+    private lateinit var routingEngine: TacticalRouterEngine
     
     companion object {
         private const val PERMISSIONS_REQUEST_RECORD_AUDIO = 1
@@ -47,6 +48,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         transcriptionText = findViewById(R.id.transcriptionText)
         
         spatialEngine = SpatialIntelligenceEngine(this)
+        
+        val routingCache = File(cacheDir, "graphhopper-cache").absolutePath
+        routingEngine = TacticalRouterEngine(this, routingCache)
         
         mapView.onCreate(savedInstanceState)
         
@@ -127,9 +131,21 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 // Pass the string to the Spatial Intelligence Engine
                 val intent = spatialEngine.parseCommand(parsedText)
                 if (intent != null) {
-                    val formatted = "INTENT:\nAction: ${intent.action}\nTarget: ${intent.entity}\nRange: ${intent.distance} ${intent.unit}"
-                    transcriptionText.text = "$formatted\n\nCalculating SpatiaLite Buffer..."
-                    spatialEngine.computeGeometricBuffer(intent)
+                    if (intent.action == "route") {
+                        transcriptionText.text = "INTENT: Route to ${intent.entity}\n\nCalculating Offline Path (GraphHopper)..."
+                        // Mock coordinates from operator to objective
+                        val routeCoords = routingEngine.calculateRoute(46.498295, 11.354758, 46.501, 11.360)
+                        if (routeCoords != null) {
+                            transcriptionText.text = "Route calculated! Target: ${intent.entity}"
+                            // Normally we would pass routeCoords to MapLibre GeoJsonSource
+                        } else {
+                            transcriptionText.text = "Route calculation failed. Ensure .gh map exists."
+                        }
+                    } else {
+                        val formatted = "INTENT:\nAction: ${intent.action}\nTarget: ${intent.entity}\nRange: ${intent.distance} ${intent.unit}"
+                        transcriptionText.text = "$formatted\n\nCalculating SpatiaLite Buffer..."
+                        spatialEngine.computeGeometricBuffer(intent)
+                    }
                 } else {
                     transcriptionText.text = "Unrecognized command phrase."
                 }
