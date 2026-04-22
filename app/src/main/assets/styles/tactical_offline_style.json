@@ -1,0 +1,19 @@
+{
+  "version": 8,
+  "name": "Offline Tactical Style",
+  "sources": {
+    "tactical_offline_source": {
+      "type": "raster",
+      "url": "mbtiles://{PLACEHOLDER_PATH}",
+      "tileSize": 256
+    }
+  },
+  "layers": [
+    {
+      "id": "tactical_offline_layer",
+      "type": "raster",
+      "source": "tactical_offline_source",
+      "paint": {}
+    }
+  ]
+}
