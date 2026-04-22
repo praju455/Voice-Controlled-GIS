@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     private var speechService: SpeechService? = null
     private var model: Model? = null
+    private lateinit var spatialEngine: SpatialIntelligenceEngine
     
     companion object {
         private const val PERMISSIONS_REQUEST_RECORD_AUDIO = 1
@@ -44,6 +45,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         mapView = findViewById(R.id.mapView)
         statusText = findViewById(R.id.statusText)
         transcriptionText = findViewById(R.id.transcriptionText)
+        
+        spatialEngine = SpatialIntelligenceEngine(this)
         
         mapView.onCreate(savedInstanceState)
         
@@ -116,13 +119,20 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     override fun onResult(hypothesis: String?) {
         hypothesis?.let { 
-            // the JSON is usually {"text": "the extracted words"}
-            Log.i(TAG, "onResult: $it")
-            // Parse out the text using simple regex for prototype, later use Snips NLU
             val match = Regex("\"text\"\\s*:\\s*\"(.*?)\"").find(it)
             val parsedText = match?.groups?.get(1)?.value ?: ""
             if (parsedText.isNotBlank()) {
-                transcriptionText.text = "Command Received: $parsedText"
+                transcriptionText.text = "Voice string: $parsedText"
+                
+                // Pass the string to the Spatial Intelligence Engine
+                val intent = spatialEngine.parseCommand(parsedText)
+                if (intent != null) {
+                    val formatted = "INTENT:\nAction: ${intent.action}\nTarget: ${intent.entity}\nRange: ${intent.distance} ${intent.unit}"
+                    transcriptionText.text = "$formatted\n\nCalculating SpatiaLite Buffer..."
+                    spatialEngine.computeGeometricBuffer(intent)
+                } else {
+                    transcriptionText.text = "Unrecognized command phrase."
+                }
             }
         }
     }

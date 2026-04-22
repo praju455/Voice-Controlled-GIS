@@ -56,6 +56,10 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("com.alphacep:vosk-android:0.3.32@aar")
     
+    // Offline SpatiaLite SQLite wrapper and TFLite
+    implementation("androidx.sqlite:sqlite:2.4.0")
+    implementation("org.tensorflow:tensorflow-lite-task-text:0.4.4")
+    
     // LeakCanary for memory profiling (debug only)
     debugImplementation("com.squareup.leakcanary:leakcanary-android:2.13")
 }
