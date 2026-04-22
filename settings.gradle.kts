@@ -13,5 +13,5 @@ dependencyResolutionManagement {
         maven { url = uri("https://jitpack.io") }
     }
 }
-rootProject.name = "OfflineTacticalMap"
+rootProject.name = "Voice-Controlled GIS"
 include(":app")
