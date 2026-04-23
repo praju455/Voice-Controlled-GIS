@@ -28,6 +28,7 @@ import org.vosk.android.StorageService
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.zip.ZipInputStream
 
 class MainActivity : AppCompatActivity(), RecognitionListener {
 
@@ -59,7 +60,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         
         spatialEngine = SpatialIntelligenceEngine(this)
         
-        val routingCache = File(cacheDir, "graphhopper-cache").absolutePath
+        unpackGraphHopperAssets()
+        val routingCache = File(File(cacheDir, "graphhopper-cache"), "eastern-zone-gh").absolutePath
         routingEngine = TacticalRouterEngine(this, routingCache)
         
         mapView.onCreate(savedInstanceState)
@@ -241,6 +243,41 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             }
         }
         return outFile.absolutePath
+    }
+
+    private fun unpackGraphHopperAssets() {
+        val cacheFolder = File(cacheDir, "graphhopper-cache")
+        if (cacheFolder.exists() && cacheFolder.list()?.isNotEmpty() == true) {
+            Log.i(TAG, "GraphHopper cache already unpacked.")
+            return
+        }
+        
+        statusText.text = "Unpacking GraphHopper map data..."
+        cacheFolder.mkdirs()
+        
+        try {
+            assets.open("graphhopper/graphhopper-cache.zip").use { inputStream ->
+                ZipInputStream(inputStream).use { zis ->
+                    var zipEntry = zis.nextEntry
+                    while (zipEntry != null) {
+                        val newFile = File(cacheFolder, zipEntry.name)
+                        if (zipEntry.isDirectory) {
+                            newFile.mkdirs()
+                        } else {
+                            newFile.parentFile?.mkdirs()
+                            FileOutputStream(newFile).use { fos ->
+                                zis.copyTo(fos)
+                            }
+                        }
+                        zipEntry = zis.nextEntry
+                    }
+                }
+            }
+            Log.i(TAG, "GraphHopper cache unpacked successfully.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to unpack GraphHopper", e)
+            statusText.text = "Error unpacking GraphHopper: ${e.message}"
+        }
     }
 
     // --- MapView and App Lifecycle ---

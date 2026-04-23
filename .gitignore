@@ -8,3 +8,4 @@ app/build/
 local.properties
 .idea/
 *.iml
+app/src/main/assets/graphhopper/graphhopper-cache.zip
