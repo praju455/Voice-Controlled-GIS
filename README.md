@@ -84,11 +84,12 @@ Because this application runs entirely offline, it requires pre-compiled geograp
 2. Export your map layers (including LULC or satellite imagery) into an MBTiles raster database.
 3. Name the file `sample_tactical.mbtiles` and drop it into `/app/src/main/assets/mbtiles/`.
 
-### 3. Generate Routing Graph (`.gh` folder)
-1. Download your region's raw OpenStreetMap file (e.g., `eastern-zone-latest.osm.pbf`) from **Geofabrik**.
-2. Download the GraphHopper Desktop `.jar`.
-3. Process the file via terminal: `java -jar graphhopper-web-X.jar import your-region.osm.pbf`.
-4. Copy the freshly generated `*-gh` folder and push it into the Android file cache (or into the `assets` folder for extraction) so the `TacticalRouterEngine` can compute geographic paths.
+### 3. Generate Routing Graph (`.gh` cache)
+1. Download your region's raw OpenStreetMap file from **Geofabrik**.
+2. Download the GraphHopper Desktop `.jar` (v8.0).
+3. Process the file via terminal using a `custom` weighting profile configuration.
+4. Compress the generated `*-gh` directory into a `.zip` file named `graphhopper-cache.zip`.
+5. Drop `graphhopper-cache.zip` into `/app/src/main/assets/graphhopper/`. The app will automatically extract it into the native Android cache upon first boot!
 
 ### 4. Build and Run
 *   Open the project in **Android Studio**.
@@ -114,7 +115,7 @@ Currently mapped fallback intents include:
 - [x] Initial map rendering pipeline (MBTiles/MapLibre)
 - [x] Acoustic model ingestion & text parsing (Vosk)
 - [x] Integrate MapLibre dynamic line overlays for Route projection
-- [ ] Connect compiled Contraction Hierarchy GraphHopper `.gh` bundles
+- [x] Connect compiled Contraction Hierarchy GraphHopper `.gh` bundles & automated unzipper
 - [ ] Full NLP entity-extraction using a lightweight TFLite model instead of regex
 - [ ] Cross-compile Native SpatiaLite SQLite drivers
 
