@@ -9,17 +9,17 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import android.graphics.Color
-import org.maplibre.android.MapLibre
-import org.maplibre.android.maps.MapboxMap
-import org.maplibre.android.maps.MapView
-import org.maplibre.android.maps.Style
-import org.maplibre.android.style.layers.LineLayer
-import org.maplibre.android.style.layers.PropertyFactory
-import org.maplibre.android.style.sources.GeoJsonSource
-import org.maplibre.geojson.Feature
-import org.maplibre.geojson.FeatureCollection
-import org.maplibre.geojson.LineString
-import org.maplibre.geojson.Point
+import com.mapbox.mapboxsdk.Mapbox
+import com.mapbox.mapboxsdk.maps.MapboxMap
+import com.mapbox.mapboxsdk.maps.MapView
+import com.mapbox.mapboxsdk.maps.Style
+import com.mapbox.mapboxsdk.style.layers.LineLayer
+import com.mapbox.mapboxsdk.style.layers.PropertyFactory
+import com.mapbox.mapboxsdk.style.sources.GeoJsonSource
+import com.mapbox.geojson.Feature
+import com.mapbox.geojson.FeatureCollection
+import com.mapbox.geojson.LineString
+import com.mapbox.geojson.Point
 import org.vosk.Model
 import org.vosk.Recognizer
 import org.vosk.android.RecognitionListener
@@ -36,7 +36,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private var mapboxMap: MapboxMap? = null
     private lateinit var statusText: TextView
     private lateinit var transcriptionText: TextView
-    private val TAG = "OfflineTacticalMap"
+    private val tag = "OfflineTacticalMap"
 
     private var speechService: SpeechService? = null
     private var model: Model? = null
@@ -50,8 +50,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Initialize MapLibre before setting content view
-        MapLibre.getInstance(this)
+        // Initialize MapLibre (legacy Mapbox class) before setting content view
+        Mapbox.getInstance(this)
         setContentView(R.layout.activity_main)
 
         mapView = findViewById(R.id.mapView)
@@ -61,7 +61,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         spatialEngine = SpatialIntelligenceEngine(this)
         
         unpackGraphHopperAssets()
-        val routingCache = File(File(cacheDir, "graphhopper-cache"), "eastern-zone-gh").absolutePath
+        val routingCache = File(cacheDir, "graphhopper-cache").absolutePath
         routingEngine = TacticalRouterEngine(this, routingCache)
         
         mapView.onCreate(savedInstanceState)
@@ -86,20 +86,20 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 val mbtilesPath = copyAssetToCache("mbtiles/sample_tactical.mbtiles")
                 val stylePath = prepareStyleJson(mbtilesPath)
                 
-                mapboxMap.setStyle(Style.Builder().fromUri("file://$stylePath")) { style ->
+                mapboxMap.setStyle(Style.Builder().fromUri("file://$stylePath")) { _ ->
                     statusText.text = "Offline Tactical Map Active"
-                    Log.i(TAG, "Map loaded offline successfully.")
+                    Log.i(tag, "Map loaded offline successfully.")
                 }
             } catch (e: Exception) {
                 statusText.text = "Error loading offline map: ${e.message}"
-                Log.e(TAG, "Failed to load map style", e)
+                Log.e(tag, "Failed to load map style", e)
             }
         }
     }
 
     private fun initModel() {
         transcriptionText.text = "Unpacking Offline Acoustic Model..."
-        StorageService.unpack(this, "models", "model",
+        StorageService.unpack(this, "models/model", "model",
             { model: Model ->
                 this.model = model
                 transcriptionText.text = "Acoustic Model Loaded. Listening..."
@@ -107,7 +107,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             },
             { exception: IOException ->
                 transcriptionText.text = "Failed to unpack model: ${exception.message}\n(Please ensure Vosk model exists in assets/models)"
-                Log.e(TAG, "Failed to unpack model", exception)
+                Log.e(tag, "Failed to unpack model", exception)
             })
     }
 
@@ -117,7 +117,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             speechService = SpeechService(rec, 16000.0f)
             speechService?.startListening(this)
         } catch (e: Exception) {
-            Log.e(TAG, "Exception starting speech service", e)
+            Log.e(tag, "Exception starting speech service", e)
         }
     }
 
@@ -147,12 +147,17 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                     if (intent.action == "route") {
                         transcriptionText.text = "INTENT: Route to ${intent.entity}\n\nCalculating Offline Path (GraphHopper)..."
                         // Mock coordinates from operator to objective
-                        val routeCoords = routingEngine.calculateRoute(46.498295, 11.354758, 46.501, 11.360)
-                        if (routeCoords != null) {
-                            transcriptionText.text = "Route calculated! Target: ${intent.entity}"
-                            drawRouteOnMap(routeCoords)
-                        } else {
-                            transcriptionText.text = "Route calculation failed. Ensure .gh map exists."
+                        try {
+                            val routeCoords = routingEngine.calculateRoute(46.498295, 11.354758, 46.501, 11.360)
+                            if (routeCoords != null) {
+                                transcriptionText.text = "Route calculated! Target: ${intent.entity}"
+                                drawRouteOnMap(routeCoords)
+                            } else {
+                                transcriptionText.text = "Route calculation failed. Ensure .gh map exists."
+                            }
+                        } catch (e: Exception) {
+                            Log.e(tag, "Routing engine error", e)
+                            transcriptionText.text = "Routing Error: ${e.message}"
                         }
                     } else {
                         val formatted = "INTENT:\nAction: ${intent.action}\nTarget: ${intent.entity}\nRange: ${intent.distance} ${intent.unit}"
@@ -183,7 +188,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     override fun onError(exception: Exception?) {
         transcriptionText.text = "Voice Engine Error: ${exception?.message}"
-        Log.e(TAG, "Vosk Error", exception)
+        Log.e(tag, "Vosk Error", exception)
     }
 
     override fun onTimeout() {
@@ -222,7 +227,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 fos.write(updatedStyle.toByteArray())
             }
         } catch (e: IOException) {
-            Log.e(TAG, "Error processing style json", e)
+            Log.e(tag, "Error processing style json", e)
             throw e
         }
         return styleFile.absolutePath
@@ -238,7 +243,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                     }
                 }
             } catch (e: IOException) {
-                Log.w(TAG, "Warning: asset $assetName not found. Return placeholder path.")
+                Log.w(tag, "Warning: asset $assetName not found. Return placeholder path.")
                 return outFile.absolutePath
             }
         }
@@ -247,8 +252,10 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     private fun unpackGraphHopperAssets() {
         val cacheFolder = File(cacheDir, "graphhopper-cache")
-        if (cacheFolder.exists() && cacheFolder.list()?.isNotEmpty() == true) {
-            Log.i(TAG, "GraphHopper cache already unpacked.")
+        val markerFile = File(cacheFolder, "eastern-zone-gh/nodes")
+        
+        if (markerFile.exists()) {
+            Log.i(tag, "GraphHopper cache already unpacked (marker found).")
             return
         }
         
@@ -261,6 +268,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                     var zipEntry = zis.nextEntry
                     while (zipEntry != null) {
                         val newFile = File(cacheFolder, zipEntry.name)
+                        Log.d(tag, "Unpacking: ${zipEntry.name} to ${newFile.absolutePath}")
                         if (zipEntry.isDirectory) {
                             newFile.mkdirs()
                         } else {
@@ -273,9 +281,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                     }
                 }
             }
-            Log.i(TAG, "GraphHopper cache unpacked successfully.")
+            Log.i(tag, "GraphHopper cache unpacked successfully.")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to unpack GraphHopper", e)
+            Log.e(tag, "Failed to unpack GraphHopper", e)
             statusText.text = "Error unpacking GraphHopper: ${e.message}"
         }
     }

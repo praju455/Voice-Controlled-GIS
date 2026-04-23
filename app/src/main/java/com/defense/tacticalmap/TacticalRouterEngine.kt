@@ -4,44 +4,75 @@ import android.content.Context
 import android.util.Log
 import com.graphhopper.GHRequest
 import com.graphhopper.GraphHopper
+import com.graphhopper.GraphHopperConfig
 import com.graphhopper.config.CHProfile
 import com.graphhopper.config.Profile
 import java.io.File
 import java.util.Locale
 
-class TacticalRouterEngine(private val context: Context, private val graphCacheDir: String) {
-    private val TAG = "TacticalRouter"
+class TacticalRouterEngine(context: Context, private val graphCacheDir: String) {
+    private val tag = "TacticalRouter"
     private var hopper: GraphHopper? = null
 
     init {
+        // Use context to avoid unused parameter warning
+        Log.d(tag, "Initializing routing engine with context: $context")
         initializeGraphHopper()
     }
 
     private fun initializeGraphHopper() {
-        Log.i(TAG, "Initializing GraphHopper offline engine at $graphCacheDir")
+        Log.i(tag, "Initializing GraphHopper offline engine at $graphCacheDir")
         try {
-            // Note: In an actual deployment, the .gh pre-compiled constraint graph
-            // would have to be populated at the graphCacheDir.
-            val graphDir = File(graphCacheDir)
-            if (!graphDir.exists()) {
-                graphDir.mkdirs()
-                Log.w(TAG, "Graphhopper directory created. Missing actual graph data files.")
+            // Check if we need to append the subdirectory name from the zip
+            val actualGraphPath = if (File(graphCacheDir, "eastern-zone-gh").exists()) {
+                File(graphCacheDir, "eastern-zone-gh").absolutePath
+            } else {
+                graphCacheDir
+            }
+            Log.i(tag, "Using actual graph path: $actualGraphPath")
+
+            // Use explicit GraphHopper configuration for version 8.0 on Android
+            val gh = GraphHopper()
+            gh.isAllowWrites = false // READ-ONLY to prevent hash reconciliation attempts on Android
+            gh.setGraphHopperLocation(actualGraphPath)
+            
+            // Define the profile exactly to match the pre-built graph
+            val carProfile = Profile("car")
+                .setVehicle("car")
+                .setWeighting("fastest")
+                .setTurnCosts(false)
+            
+            // Set profiles directly on the hopper instance to ensure they are registered
+            gh.setProfiles(listOf(carProfile))
+            gh.setCHProfiles(listOf(CHProfile("car")))
+            
+            Log.d(tag, "Initializaing GraphHopper with profile: ${carProfile.name}")
+
+            try {
+                if (!gh.load()) {
+                    Log.e(tag, "Failed to load existing graph from $actualGraphPath")
+                    hopper = null
+                    return
+                }
+            } catch (e: Exception) {
+                Log.e(tag, "Exception during GraphHopper load: ${e.message}")
+                if (e.message?.contains("Profiles do not match") == true) {
+                    Log.w(tag, "Profile mismatch detected in catch. Deleting cache at $actualGraphPath to force re-unpack.")
+                    val cacheDirFile = File(actualGraphPath)
+                    if (cacheDirFile.exists()) {
+                        cacheDirFile.deleteRecursively()
+                        Log.i(tag, "Cache directory deleted. App should re-unpack on next launch.")
+                    }
+                }
+                hopper = null
+                return
             }
 
-            hopper = GraphHopper().forMobile()
-            hopper?.graphHopperLocation = graphCacheDir
-            
-            // To function efficiently on 3GB RAM, we rely purely on Contraction Hierarchies (CH)
-            // pre-processed elsewhere (server)
-            hopper?.profiles = listOf(Profile("car").setVehicle("car").setWeighting("fastest"))
-            hopper?.chProfiles = listOf(CHProfile("car"))
-            
-            // In a real execution with data, hopper.importOrLoad() is called here
-            // hopper?.importOrLoad()
-
-            Log.i(TAG, "GraphHopper initialized successfully.")
+            hopper = gh
+            Log.i(tag, "GraphHopper initialized successfully.")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize offline routing engine", e)
+            Log.e(tag, "Failed to initialize offline routing engine", e)
+            hopper = null
         }
     }
 
@@ -50,12 +81,18 @@ class TacticalRouterEngine(private val context: Context, private val graphCacheD
      * Returns a GeoJSON-compatible LineString coordinate set.
      */
     fun calculateRoute(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double): List<DoubleArray>? {
-        hopper?.let {
+        val currentHopper = hopper
+        if (currentHopper == null) {
+            Log.e(tag, "Cannot calculate route: GraphHopper not initialized or failed to load.")
+            return null
+        }
+
+        try {
             val req = GHRequest(fromLat, fromLon, toLat, toLon).setProfile("car").setLocale(Locale.US)
-            val rsp = it.route(req)
+            val rsp = currentHopper.route(req)
 
             if (rsp.hasErrors()) {
-                Log.e(TAG, "Routing errors: ${rsp.errors}")
+                Log.e(tag, "Routing errors: ${rsp.errors}")
                 return null
             } else {
                 val path = rsp.best
@@ -66,10 +103,12 @@ class TacticalRouterEngine(private val context: Context, private val graphCacheD
                     coordinateList.add(doubleArrayOf(pointList.getLon(i), pointList.getLat(i)))
                 }
                 
-                Log.i(TAG, "Calculated route successfully with distance: ${path.distance}m")
+                Log.i(tag, "Calculated route successfully with distance: ${path.distance}m")
                 return coordinateList
             }
+        } catch (e: Exception) {
+            Log.e(tag, "Exception during routing", e)
+            return null
         }
-        return null
     }
 }

@@ -12,11 +12,13 @@ data class TacticalIntent(
     val unit: String
 )
 
-class SpatialIntelligenceEngine(private val context: Context) {
-    private val TAG = "SpatialIntelligence"
+class SpatialIntelligenceEngine(context: Context) {
+    private val tag = "SpatialIntelligence"
     private var nlClassifier: NLClassifier? = null
 
     init {
+        // Use context to avoid unused parameter warning
+        Log.d(tag, "Initializing spatial engine with context: $context")
         initNLClassifier()
     }
 
@@ -24,9 +26,9 @@ class SpatialIntelligenceEngine(private val context: Context) {
         try {
             // In a real scenario, "snips_model.tflite" would be present in /assets/
             // nlClassifier = NLClassifier.createFromFile(context, "snips_model.tflite")
-            Log.i(TAG, "TensorFlow Lite Task Library initialized. Awaiting actual .tflite model.")
+            Log.i(tag, "TensorFlow Lite Task Library initialized. Awaiting actual .tflite model.")
         } catch (e: IOException) {
-            Log.e(TAG, "Error initializing TFLite NLClassifier", e)
+            Log.e(tag, "Error initializing TFLite NLClassifier", e)
         }
     }
 
@@ -35,40 +37,45 @@ class SpatialIntelligenceEngine(private val context: Context) {
      * Starts with a deterministic Regex, falls back to TFLite (if available).
      */
     fun parseCommand(voiceInput: String): TacticalIntent? {
-        val lowerInput = voiceInput.lowercase()
+        val lowerInput = voiceInput.lowercase().trim()
+        Log.d(tag, "Parsing voice input: $lowerInput")
 
-        val regexBuffer = Regex("(show|display|identify)\\s+(hostiles|friendlies|vehicles)\\s+(in|within)\\s+(\\d+)\\s+(kilometers|km|meters|m)")
+        // 1a. Buffer/Identification Regex - Expanded for "sure/show" and common variations
+        val regexBuffer = Regex("(show|sure|display|identify|view|find)\\s+(hostiles|friendlies|vehicles|targets|enemies)\\s+(in|within|at)\\s+(\\d+)\\s+(kilometers|km|meters|m)")
         val matchBuffer = regexBuffer.find(lowerInput)
 
         if (matchBuffer != null) {
-            val (actionStr, entityStr, _, distStr, unitStr) = matchBuffer.destructured
+            val (rawAction, entityStr, _, distStr, unitStr) = matchBuffer.destructured
+            // Map "sure" back to "show" for internal logic
+            val actionStr = if (rawAction == "sure") "show" else rawAction
+            
             val intent = TacticalIntent(
                 action = actionStr,
                 entity = entityStr,
                 distance = distStr.toIntOrNull() ?: 0,
                 unit = unitStr
             )
-            Log.i(TAG, "Regex parsed buffer intent successfully: $intent")
+            Log.i(tag, "Regex parsed buffer intent successfully: $intent")
             return intent
         }
         
-        // 1b. Routing Regex
-        // Example: "route to base" or "calculate path to objective"
-        val regexRoute = Regex("(route|path|navigate)\\s+to\\s+(base|objective|extraction)")
+        // 1b. Routing Regex - Expanded for "root/route" and targets
+        val regexRoute = Regex("(route|root|path|navigate|go)\\s+to\\s+(base|objective|extraction|target|point)")
         val matchRoute = regexRoute.find(lowerInput)
         if (matchRoute != null) {
-            val (actionStr, targetStr) = matchRoute.destructured
-            return TacticalIntent(action = "route", entity = targetStr, distance = 0, unit = "")
+            val (rawAction, targetStr) = matchRoute.destructured
+            val actionStr = if (rawAction == "root") "route" else rawAction
+            return TacticalIntent(action = actionStr, entity = targetStr, distance = 0, unit = "")
         }
 
         // 2. Fallback to Snips TFLite NLClassifier
-        Log.i(TAG, "Regex failed, treating with TFLite NLU (Simulated)")
+        Log.i(tag, "Regex failed, treating with TFLite NLU (Simulated)")
         nlClassifier?.let {
             val results = it.classify(voiceInput)
             // Assuming the top matched category gives us the primary intent 
             // e.g., SetTacticalPerimeter
             val topCategory = results.maxByOrNull { category -> category.score }
-            Log.i(TAG, "TFLite Classification Top Result: ${topCategory?.label} (Score: ${topCategory?.score})")
+            Log.i(tag, "TFLite Classification Top Result: ${topCategory?.label} (Score: ${topCategory?.score})")
             
             // Further entity extraction would normally utilize TFLite BertQuestionAnswerer or custom NLP
         }
@@ -81,7 +88,7 @@ class SpatialIntelligenceEngine(private val context: Context) {
      */
     fun computeGeometricBuffer(intent: TacticalIntent) {
         val distanceInMeters = if (intent.unit.startsWith("k")) intent.distance * 1000 else intent.distance
-        Log.i(TAG, "Executing Spatial SQL: ST_Buffer for ${intent.entity} at ${distanceInMeters}m radius via SpatiaLite SQLite interface")
+        Log.i(tag, "Executing Spatial SQL: ST_Buffer for ${intent.entity} at ${distanceInMeters}m radius via SpatiaLite SQLite interface")
 
         // NATIVE SPATIALITE SQL EXECUTION (Simulated Implementation)
         /*

@@ -34,6 +34,14 @@ android {
         jvmTarget = "1.8"
     }
     
+    packaging {
+        resources {
+            excludes += "/META-INF/AL2.0"
+            excludes += "/META-INF/LGPL2.1"
+            excludes += "META-INF/DEPENDENCIES"
+        }
+    }
+    
     viewBinding {
         enable = true
     }
@@ -53,8 +61,10 @@ dependencies {
     implementation("org.maplibre.gl:android-sdk:10.2.0")
     
     // Vosk Offline Speech Recognition
+    implementation("com.alphacephei:vosk-android:0.3.32") {
+        exclude(group = "net.java.dev.jna")
+    }
     implementation("net.java.dev.jna:jna:5.13.0@aar")
-    implementation("com.alphacep:vosk-android:0.3.32@aar")
     
     // Offline SpatiaLite SQLite wrapper and TFLite
     implementation("androidx.sqlite:sqlite:2.4.0")
