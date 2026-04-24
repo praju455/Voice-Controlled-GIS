@@ -39,7 +39,7 @@ class TacticalRouterEngine(context: Context, private val graphCacheDir: String) 
             // Define the profile exactly to match the pre-built graph
             val carProfile = Profile("car")
                 .setVehicle("car")
-                .setWeighting("fastest")
+                .setWeighting("custom")
                 .setTurnCosts(false)
             
             // Set profiles directly on the hopper instance to ensure they are registered
