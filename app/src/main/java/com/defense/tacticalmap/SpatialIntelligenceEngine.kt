@@ -59,8 +59,8 @@ class SpatialIntelligenceEngine(context: Context) {
             return intent
         }
         
-        // 1b. Routing Regex - Expanded for "root/route" and targets
-        val regexRoute = Regex("(route|root|path|navigate|go)\\s+to\\s+(base|objective|extraction|target|point)")
+        // 1b. Routing Regex - Tolerates omitted "to" and extra filler words from speech recognition.
+        val regexRoute = Regex("(route|root|path|navigate|go)(?:\\s+me)?(?:\\s+to)?(?:\\s+the)?\\s+(base|objective|extraction|target|point)")
         val matchRoute = regexRoute.find(lowerInput)
         if (matchRoute != null) {
             val (rawAction, targetStr) = matchRoute.destructured

@@ -4,11 +4,21 @@
   "sources": {
     "tactical_offline_source": {
       "type": "raster",
-      "url": "mbtiles://{PLACEHOLDER_PATH}",
-      "tileSize": 256
+      "tiles": ["{PLACEHOLDER_PATH}"],
+      "tileSize": 256,
+      "bounds": [{PLACEHOLDER_BOUNDS}],
+      "minzoom": {PLACEHOLDER_MIN_ZOOM},
+      "maxzoom": {PLACEHOLDER_MAX_ZOOM}
     }
   },
   "layers": [
+    {
+      "id": "tactical_background",
+      "type": "background",
+      "paint": {
+        "background-color": "#08141a"
+      }
+    },
     {
       "id": "tactical_offline_layer",
       "type": "raster",
