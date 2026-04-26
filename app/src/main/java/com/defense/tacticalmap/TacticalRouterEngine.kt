@@ -4,8 +4,13 @@ import android.content.Context
 import android.util.Log
 import com.graphhopper.GHRequest
 import com.graphhopper.GraphHopper
-import com.graphhopper.config.CHProfile
 import com.graphhopper.config.Profile
+import com.graphhopper.routing.DefaultWeightingFactory
+import com.graphhopper.routing.WeightingFactory
+import com.graphhopper.routing.ev.VehicleAccess
+import com.graphhopper.routing.ev.RoadAccess
+import com.graphhopper.routing.ev.VehicleSpeed
+import com.graphhopper.routing.weighting.FastestWeighting
 import com.graphhopper.util.CustomModel
 import java.io.File
 import java.util.Locale
@@ -48,7 +53,21 @@ class TacticalRouterEngine(context: Context, private val graphCacheDir: String) 
             // Recreate the exact profile structure used during desktop import. For GraphHopper 8
             // the profile version hash includes hint insertion order, so we must mirror the
             // config.yml import path: custom_model_files first, then the resolved empty custom model.
-            val gh = GraphHopper()
+            val gh = object : GraphHopper() {
+                override fun createWeightingFactory(): WeightingFactory {
+                    val defaultFactory = DefaultWeightingFactory(baseGraph.baseGraph, encodingManager)
+                    return WeightingFactory { profile, requestHints, disableTurnCosts ->
+                        if (profile.weighting.equals("custom", ignoreCase = true) && profile.vehicle == "car") {
+                            val accessEnc = encodingManager.getBooleanEncodedValue(VehicleAccess.key(profile.vehicle))
+                            val speedEnc = encodingManager.getDecimalEncodedValue(VehicleSpeed.key(profile.vehicle))
+                            val roadAccessEnc = encodingManager.getEnumEncodedValue(RoadAccess.KEY, RoadAccess::class.java)
+                            FastestWeighting(accessEnc, speedEnc, roadAccessEnc, requestHints, com.graphhopper.routing.weighting.TurnCostProvider.NO_TURN_COST_PROVIDER)
+                        } else {
+                            defaultFactory.createWeighting(profile, requestHints, disableTurnCosts)
+                        }
+                    }
+                }
+            }
             gh.isAllowWrites = false // READ-ONLY to prevent hash reconciliation attempts on Android
             gh.setGraphHopperLocation(actualGraphPath)
             val carProfile = Profile("car")
@@ -59,7 +78,6 @@ class TacticalRouterEngine(context: Context, private val graphCacheDir: String) 
             carProfile.putHint("custom_model_files", emptyList<String>())
             carProfile.setCustomModel(CustomModel())
             gh.setProfiles(listOf(carProfile))
-            gh.chPreparationHandler.setCHProfiles(listOf(CHProfile("car")))
             Log.d(tag, "Initializing GraphHopper with reproduced profile hash: ${carProfile.name}")
 
             try {
@@ -106,7 +124,10 @@ class TacticalRouterEngine(context: Context, private val graphCacheDir: String) 
         }
 
         try {
-            val req = GHRequest(fromLat, fromLon, toLat, toLon).setProfile("car").setLocale(Locale.US)
+            val req = GHRequest(fromLat, fromLon, toLat, toLon)
+                .setProfile("car")
+                .setLocale(Locale.US)
+            req.putHint("ch.disable", true)
             val rsp = currentHopper.route(req)
 
             if (rsp.hasErrors()) {

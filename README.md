@@ -123,7 +123,14 @@ Currently mapped fallback intents include:
 - [x] Acoustic model ingestion & text parsing (Vosk)
 - [x] Integrate MapLibre dynamic line overlays for Route projection
 - [x] Connect compiled Contraction Hierarchy GraphHopper `.gh` bundles & automated unzipper
+- [x] Validate offline route computation and render route overlays on-device
+- [x] Localize demo assets for the BMSIT operating zone
+- [ ] Replace the current demo route seed coordinates with live GPS operator positioning
 - [ ] Full NLP entity-extraction using a lightweight TFLite model instead of regex
 - [ ] Cross-compile Native SpatiaLite SQLite drivers
+
+## 📌 Current Status
+
+The prototype now runs end-to-end on Android with offline map rendering, offline speech recognition, offline routing graph loading, and route visualization working on-device. The current implementation uses a localized BMSIT-area routing graph and offline MBTiles package for demo operation. The next engineering milestone is replacing the current demo route seed coordinates with live GPS-driven operator positioning and destination-aware routing.
 
 *Maintainer Note: Built as a Hackathon proof-of-concept for offline tactical tracking.*
