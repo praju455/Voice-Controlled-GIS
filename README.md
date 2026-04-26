@@ -19,6 +19,13 @@ Instead of relying on cloud services, this app natively processes speech, render
 
 Every component in this stack was exclusively chosen because it operates entirely without cloud APIs or internet connections:
 
+### 💻 Programming Languages & Shell
+*   **Kotlin:** Used as the primary Android application framework to orchestrate the UI, native threads, and intent parsing engine.
+*   **Java (JRE 17):** Used strictly on the desktop to execute the heavy GraphHopper `.jar` file for compiling raw OSM data into optimized offline networks.
+*   **C++ & JNI:** Running under the hood via Android NDK bindings to power the insanely fast MapLibre OpenGL map rendering and the SpatiaLite geospatial matrix logic.
+*   **XML:** Formats the Android user interfaces and layouts.
+*   **YAML & JSON:** Used as configuration logic for the offline GraphHopper caching rules and the tactical Mapbox stylistic layers.
+
 ### 1. MapLibre Native (The UI & Rendering Engine)
 *   **Android / Kotlin:** The core container application.
 *   **[MapLibre Native (Android)](https://maplibre.org/):** An open-source vector/raster engine. Instead of streaming tiles via the internet like Google Maps, it runs natively on the Android GPU. We point it to query a local SQLite database (`.mbtiles`) packed with thousands of tiny, pre-rendered geospatial images 60 times a second to ensure seamless map painting regardless of connectivity.
