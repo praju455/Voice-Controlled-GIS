@@ -59,15 +59,6 @@ class SpatialIntelligenceEngine(context: Context) {
             return intent
         }
         
-        // 1b. Routing Regex - Tolerates omitted "to" and extra filler words from speech recognition.
-        val regexRoute = Regex("(route|root|path|navigate|go)(?:\\s+me)?(?:\\s+to)?(?:\\s+the)?\\s+(base|objective|extraction|target|point)")
-        val matchRoute = regexRoute.find(lowerInput)
-        if (matchRoute != null) {
-            val (rawAction, targetStr) = matchRoute.destructured
-            val actionStr = if (rawAction == "root") "route" else rawAction
-            return TacticalIntent(action = actionStr, entity = targetStr, distance = 0, unit = "")
-        }
-
         val regexClearRoute = Regex("(clear|remove|delete|reset)\\s+(the\\s+)?route")
         if (regexClearRoute.containsMatchIn(lowerInput)) {
             return TacticalIntent(action = "clear_route", entity = "route", distance = 0, unit = "")
@@ -81,6 +72,18 @@ class SpatialIntelligenceEngine(context: Context) {
         val regexRecenter = Regex("(recenter|centre|center)(?:\\s+(on|to))?(?:\\s+me)?")
         if (regexRecenter.containsMatchIn(lowerInput) || lowerInput.contains("recenter on me") || lowerInput.contains("center on me")) {
             return TacticalIntent(action = "recenter", entity = "operator", distance = 0, unit = "")
+        }
+
+        // 1b. Routing Regex - Capture the entire requested destination phrase for offline lookup.
+        val regexRoute = Regex("^(route|root|path|navigate|go)(?:\\s+me)?(?:\\s+to)?(?:\\s+the)?\\s+(.+)$")
+        val matchRoute = regexRoute.find(lowerInput)
+        if (matchRoute != null) {
+            val rawAction = matchRoute.groupValues[1]
+            val targetStr = matchRoute.groupValues[2].trim()
+            val actionStr = if (rawAction == "root") "route" else rawAction
+            if (targetStr.isNotBlank()) {
+                return TacticalIntent(action = actionStr, entity = targetStr, distance = 0, unit = "")
+            }
         }
 
         // 2. Fallback to Snips TFLite NLClassifier

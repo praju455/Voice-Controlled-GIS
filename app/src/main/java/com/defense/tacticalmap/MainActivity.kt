@@ -58,6 +58,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private var model: Model? = null
     private lateinit var spatialEngine: SpatialIntelligenceEngine
     private lateinit var routingEngine: TacticalRouterEngine
+    private lateinit var placeIndex: OfflinePlaceIndex
     private val locationListener = LocationListener { location ->
         currentLocation = location
         drawCurrentLocation(location)
@@ -109,6 +110,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         
         spatialEngine = SpatialIntelligenceEngine(this)
+        placeIndex = OfflinePlaceIndex(this)
         
         unpackGraphHopperAssets()
         val routingCache = File(cacheDir, "graphhopper-cache").absolutePath
@@ -220,7 +222,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 if (intent != null) {
                     if (intent.action == "route") {
                         transcriptionText.text = "INTENT: Route to ${intent.entity}\n\nCalculating Offline Path (GraphHopper)..."
-                        val routeRequestResult = buildRouteRequest()
+                        val routeRequestResult = buildRouteRequest(intent.entity)
                         if (routeRequestResult == null) {
                             transcriptionText.text = "Routing blocked: waiting for offline map package."
                             return
@@ -241,7 +243,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                                 routeRequest[3]
                             )
                             if (routeResult != null) {
-                                val destinationLabel = if (selectedDestination != null) "selected point" else intent.entity
+                                val destinationLabel = routeRequestResult.destinationLabel
                                 transcriptionText.text = "Route calculated! Target: $destinationLabel"
                                 drawRouteOnMap(routeResult.coordinates)
                                 focusCameraOnRoute(routeResult.coordinates)
@@ -490,10 +492,17 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     private data class RouteRequestResult(
         val coordinates: DoubleArray? = null,
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val destinationLabel: String = "objective"
     )
 
-    private fun buildRouteRequest(): RouteRequestResult? {
+    private data class ResolvedDestination(
+        val latitude: Double,
+        val longitude: Double,
+        val label: String
+    )
+
+    private fun buildRouteRequest(destinationPhrase: String): RouteRequestResult? {
         val packageInfo = mapPackageInfo ?: return null
         val location = currentLocation
             ?: return RouteRequestResult(errorMessage = "Waiting for GPS fix before routing.")
@@ -503,15 +512,38 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             )
         }
 
-        val objectivePoint = buildObjectivePoint(packageInfo)
+        val resolvedDestination = resolveDestinationPoint(destinationPhrase, packageInfo, location)
+            ?: return RouteRequestResult(errorMessage = "Destination \"$destinationPhrase\" was not found in the offline place index.")
         return RouteRequestResult(
             coordinates = doubleArrayOf(
                 location.latitude,
                 location.longitude,
-                objectivePoint[0],
-                objectivePoint[1]
-            )
+                resolvedDestination.latitude,
+                resolvedDestination.longitude
+            ),
+            destinationLabel = resolvedDestination.label
         )
+    }
+
+    private fun resolveDestinationPoint(
+        destinationPhrase: String,
+        packageInfo: MapPackageInfo,
+        currentLocation: Location
+    ): ResolvedDestination? {
+        val normalized = destinationPhrase.lowercase().trim()
+        if (normalized in setOf("objective", "target", "point", "selected point")) {
+            selectedDestination?.let {
+                return ResolvedDestination(it.latitude, it.longitude, "selected point")
+            }
+            val objectivePoint = buildObjectivePoint(packageInfo)
+            return ResolvedDestination(objectivePoint[0], objectivePoint[1], "objective")
+        }
+
+        val placeMatch = placeIndex.resolve(destinationPhrase, currentLocation) ?: return null
+        val destinationLatLng = LatLng(placeMatch.lat, placeMatch.lon)
+        selectedDestination = destinationLatLng
+        drawDestinationMarker(destinationLatLng)
+        return ResolvedDestination(placeMatch.lat, placeMatch.lon, placeMatch.name)
     }
 
     private fun buildObjectivePoint(packageInfo: MapPackageInfo): DoubleArray {
