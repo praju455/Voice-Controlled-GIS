@@ -125,12 +125,17 @@ Currently mapped fallback intents include:
 - [x] Connect compiled Contraction Hierarchy GraphHopper `.gh` bundles & automated unzipper
 - [x] Validate offline route computation and render route overlays on-device
 - [x] Localize demo assets for the BMSIT operating zone
-- [ ] Replace the current demo route seed coordinates with live GPS operator positioning
+- [x] Replace the current demo route seed coordinates with live GPS operator positioning
+- [x] Add tap-to-select destination routing on the offline map
+- [x] Surface route distance and ETA inside the Android UI
+- [x] Add voice controls for route clearing, destination clearing, and recentering
 - [ ] Full NLP entity-extraction using a lightweight TFLite model instead of regex
 - [ ] Cross-compile Native SpatiaLite SQLite drivers
+- [ ] Add named destination routing for saved tactical points and offline place lookup
+- [ ] Track remaining distance/ETA and reroute when the operator deviates from the path
 
 ## 📌 Current Status
 
-The prototype now runs end-to-end on Android with offline map rendering, offline speech recognition, offline routing graph loading, and route visualization working on-device. The current implementation uses a localized BMSIT-area routing graph and offline MBTiles package for demo operation. The next engineering milestone is replacing the current demo route seed coordinates with live GPS-driven operator positioning and destination-aware routing.
+The prototype now runs end-to-end on Android with offline map rendering, offline speech recognition, offline routing graph loading, live GPS operator positioning, tap-to-select destinations, on-device route computation, and route visualization working on-device. The current implementation also surfaces route distance and ETA, and supports voice controls for clearing routes, clearing destinations, and recentering on the operator. The next engineering milestone is destination-name routing using saved tactical points and offline place lookup.
 
 *Maintainer Note: Built as a Hackathon proof-of-concept for offline tactical tracking.*

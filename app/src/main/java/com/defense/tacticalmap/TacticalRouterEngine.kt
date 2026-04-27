@@ -20,6 +20,12 @@ class TacticalRouterEngine(context: Context, private val graphCacheDir: String) 
     private var hopper: GraphHopper? = null
     private var lastError: String? = null
 
+    data class RouteResult(
+        val coordinates: List<DoubleArray>,
+        val distanceMeters: Double,
+        val durationMillis: Long
+    )
+
     init {
         // Use context to avoid unused parameter warning
         Log.d(tag, "Initializing routing engine with context: $context")
@@ -115,7 +121,7 @@ class TacticalRouterEngine(context: Context, private val graphCacheDir: String) 
      * Calculates the fastest route entirely offline using Contraction Hierarchies.
      * Returns a GeoJSON-compatible LineString coordinate set.
      */
-    fun calculateRoute(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double): List<DoubleArray>? {
+    fun calculateRoute(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double): RouteResult? {
         val currentHopper = hopper
         if (currentHopper == null) {
             lastError = lastError ?: "GraphHopper not initialized or failed to load"
@@ -145,7 +151,11 @@ class TacticalRouterEngine(context: Context, private val graphCacheDir: String) 
                 
                 lastError = null
                 Log.i(tag, "Calculated route successfully with distance: ${path.distance}m")
-                return coordinateList
+                return RouteResult(
+                    coordinates = coordinateList,
+                    distanceMeters = path.distance,
+                    durationMillis = path.time
+                )
             }
         } catch (e: Exception) {
             lastError = e.message ?: "Unknown routing exception"

@@ -68,6 +68,21 @@ class SpatialIntelligenceEngine(context: Context) {
             return TacticalIntent(action = actionStr, entity = targetStr, distance = 0, unit = "")
         }
 
+        val regexClearRoute = Regex("(clear|remove|delete|reset)\\s+(the\\s+)?route")
+        if (regexClearRoute.containsMatchIn(lowerInput)) {
+            return TacticalIntent(action = "clear_route", entity = "route", distance = 0, unit = "")
+        }
+
+        val regexClearDestination = Regex("(clear|remove|delete|reset)\\s+(the\\s+)?(destination|marker|target|objective)")
+        if (regexClearDestination.containsMatchIn(lowerInput)) {
+            return TacticalIntent(action = "clear_destination", entity = "destination", distance = 0, unit = "")
+        }
+
+        val regexRecenter = Regex("(recenter|centre|center)(?:\\s+(on|to))?(?:\\s+me)?")
+        if (regexRecenter.containsMatchIn(lowerInput) || lowerInput.contains("recenter on me") || lowerInput.contains("center on me")) {
+            return TacticalIntent(action = "recenter", entity = "operator", distance = 0, unit = "")
+        }
+
         // 2. Fallback to Snips TFLite NLClassifier
         Log.i(tag, "Regex failed, treating with TFLite NLU (Simulated)")
         nlClassifier?.let {

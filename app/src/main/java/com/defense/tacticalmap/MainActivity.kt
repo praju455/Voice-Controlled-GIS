@@ -8,6 +8,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -44,6 +45,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private lateinit var mapView: MapView
     private var mapboxMap: MapboxMap? = null
     private lateinit var statusText: TextView
+    private lateinit var routeSummaryText: TextView
     private lateinit var transcriptionText: TextView
     private val tag = "OfflineTacticalMap"
     private var mapPackageInfo: MapPackageInfo? = null
@@ -76,6 +78,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         private const val OPERATOR_LAYER_ID = "operator-location-layer"
         private const val DESTINATION_SOURCE_ID = "destination-source"
         private const val DESTINATION_LAYER_ID = "destination-layer"
+        private const val ROUTE_SOURCE_ID = "tactical-route-source"
+        private const val ROUTE_LAYER_ID = "tactical-route-layer"
     }
 
     data class MapPackageInfo(
@@ -100,6 +104,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
         mapView = findViewById(R.id.mapView)
         statusText = findViewById(R.id.statusText)
+        routeSummaryText = findViewById(R.id.routeSummaryText)
         transcriptionText = findViewById(R.id.transcriptionText)
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         
@@ -229,24 +234,39 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                             return
                         }
                         try {
-                            val routeCoords = routingEngine.calculateRoute(
+                            val routeResult = routingEngine.calculateRoute(
                                 routeRequest[0],
                                 routeRequest[1],
                                 routeRequest[2],
                                 routeRequest[3]
                             )
-                            if (routeCoords != null) {
+                            if (routeResult != null) {
                                 val destinationLabel = if (selectedDestination != null) "selected point" else intent.entity
                                 transcriptionText.text = "Route calculated! Target: $destinationLabel"
-                                drawRouteOnMap(routeCoords)
-                                focusCameraOnRoute(routeCoords)
+                                drawRouteOnMap(routeResult.coordinates)
+                                focusCameraOnRoute(routeResult.coordinates)
+                                updateRouteSummary(routeResult, destinationLabel)
                             } else {
                                 val routingError = routingEngine.getLastError() ?: "Unknown GraphHopper error"
                                 transcriptionText.text = "Route calculation failed: $routingError"
+                                clearRouteSummary()
                             }
                         } catch (e: Exception) {
                             Log.e(tag, "Routing engine error", e)
                             transcriptionText.text = "Routing Error: ${e.message}"
+                            clearRouteSummary()
+                        }
+                    } else if (intent.action == "clear_route") {
+                        clearRouteOverlay()
+                        transcriptionText.text = "Route cleared."
+                    } else if (intent.action == "clear_destination") {
+                        clearDestinationSelection()
+                        transcriptionText.text = "Destination cleared."
+                    } else if (intent.action == "recenter") {
+                        if (recenterOnOperator()) {
+                            transcriptionText.text = "Recentering on operator position."
+                        } else {
+                            transcriptionText.text = "Cannot recenter: waiting for GPS fix inside the offline zone."
                         }
                     } else {
                         val formatted = "INTENT:\nAction: ${intent.action}\nTarget: ${intent.entity}\nRange: ${intent.distance} ${intent.unit}"
@@ -295,8 +315,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             if (source != null) {
                 source.setGeoJson(featureCollection)
             } else {
-                style.addSource(GeoJsonSource("tactical-route-source", featureCollection))
-                style.addLayer(LineLayer("tactical-route-layer", "tactical-route-source").withProperties(
+                style.addSource(GeoJsonSource(ROUTE_SOURCE_ID, featureCollection))
+                style.addLayer(LineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID).withProperties(
                     PropertyFactory.lineWidth(5f),
                     PropertyFactory.lineColor(Color.RED)
                 ))
@@ -511,9 +531,27 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             transcriptionText.text = "Selected point is outside the offline mission zone."
             return
         }
+        clearRouteOverlay()
         selectedDestination = point
         drawDestinationMarker(point)
         transcriptionText.text = "Destination selected. Say \"route to objective\" to navigate."
+    }
+
+    private fun clearRouteOverlay() {
+        mapboxMap?.getStyle { style ->
+            val source = style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID) ?: return@getStyle
+            source.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+        }
+        clearRouteSummary()
+    }
+
+    private fun clearDestinationSelection() {
+        selectedDestination = null
+        clearRouteOverlay()
+        mapboxMap?.getStyle { style ->
+            val source = style.getSourceAs<GeoJsonSource>(DESTINATION_SOURCE_ID) ?: return@getStyle
+            source.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+        }
     }
 
     private fun ensureLocationAccess() {
@@ -593,6 +631,49 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             .target(LatLng(targetLat, targetLon))
             .zoom(zoom)
             .build()
+    }
+
+    private fun updateRouteSummary(routeResult: TacticalRouterEngine.RouteResult, destinationLabel: String) {
+        val distanceText = formatDistance(routeResult.distanceMeters)
+        val etaText = formatDuration(routeResult.durationMillis)
+        routeSummaryText.text = "Destination: $destinationLabel\nDistance: $distanceText\nETA: $etaText"
+        routeSummaryText.visibility = View.VISIBLE
+    }
+
+    private fun clearRouteSummary() {
+        routeSummaryText.visibility = View.GONE
+        routeSummaryText.text = ""
+    }
+
+    private fun formatDistance(distanceMeters: Double): String {
+        return if (distanceMeters >= 1000.0) {
+            String.format("%.1f km", distanceMeters / 1000.0)
+        } else {
+            "${distanceMeters.toInt()} m"
+        }
+    }
+
+    private fun formatDuration(durationMillis: Long): String {
+        val totalMinutes = (durationMillis / 60000L).coerceAtLeast(1L)
+        val hours = totalMinutes / 60L
+        val minutes = totalMinutes % 60L
+        return when {
+            hours > 0L && minutes > 0L -> "${hours}h ${minutes}m"
+            hours > 0L -> "${hours}h"
+            else -> "${minutes} min"
+        }
+    }
+
+    private fun recenterOnOperator(): Boolean {
+        val location = currentLocation ?: return false
+        if (!isInsideOfflineBounds(location)) {
+            return false
+        }
+        mapboxMap?.cameraPosition = CameraPosition.Builder()
+            .target(LatLng(location.latitude, location.longitude))
+            .zoom((mapPackageInfo?.maxZoom ?: 15).toDouble().coerceAtMost(16.0))
+            .build()
+        return true
     }
     
     private fun copyAssetToCache(assetName: String): String {
