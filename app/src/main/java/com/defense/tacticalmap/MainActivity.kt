@@ -3,6 +3,9 @@ package com.defense.tacticalmap
 import android.Manifest
 import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.os.Bundle
 import android.util.Log
 import android.widget.TextView
@@ -16,6 +19,7 @@ import com.mapbox.mapboxsdk.maps.MapboxMap
 import com.mapbox.mapboxsdk.maps.MapView
 import com.mapbox.mapboxsdk.maps.Style
 import com.mapbox.mapboxsdk.geometry.LatLng
+import com.mapbox.mapboxsdk.style.layers.CircleLayer
 import com.mapbox.mapboxsdk.style.layers.LineLayer
 import com.mapbox.mapboxsdk.style.layers.PropertyFactory
 import com.mapbox.mapboxsdk.style.sources.GeoJsonSource
@@ -43,14 +47,35 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private lateinit var transcriptionText: TextView
     private val tag = "OfflineTacticalMap"
     private var mapPackageInfo: MapPackageInfo? = null
+    private lateinit var locationManager: LocationManager
+    private var currentLocation: Location? = null
+    private var hasCenteredOnOperator = false
+    private var selectedDestination: LatLng? = null
 
     private var speechService: SpeechService? = null
     private var model: Model? = null
     private lateinit var spatialEngine: SpatialIntelligenceEngine
     private lateinit var routingEngine: TacticalRouterEngine
+    private val locationListener = LocationListener { location ->
+        currentLocation = location
+        drawCurrentLocation(location)
+        updateLocationStatus(location)
+        if (!hasCenteredOnOperator && isInsideOfflineBounds(location)) {
+            mapboxMap?.cameraPosition = CameraPosition.Builder()
+                .target(LatLng(location.latitude, location.longitude))
+                .zoom((mapPackageInfo?.maxZoom ?: 15).toDouble().coerceAtMost(16.0))
+                .build()
+            hasCenteredOnOperator = true
+        }
+    }
     
     companion object {
         private const val PERMISSIONS_REQUEST_RECORD_AUDIO = 1
+        private const val PERMISSIONS_REQUEST_LOCATION = 2
+        private const val OPERATOR_SOURCE_ID = "operator-location-source"
+        private const val OPERATOR_LAYER_ID = "operator-location-layer"
+        private const val DESTINATION_SOURCE_ID = "destination-source"
+        private const val DESTINATION_LAYER_ID = "destination-layer"
     }
 
     data class MapPackageInfo(
@@ -76,6 +101,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         mapView = findViewById(R.id.mapView)
         statusText = findViewById(R.id.statusText)
         transcriptionText = findViewById(R.id.transcriptionText)
+        locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         
         spatialEngine = SpatialIntelligenceEngine(this)
         
@@ -87,6 +113,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         
         // Setup Map
         initializeMap()
+        ensureLocationAccess()
 
         // Check Permissions for Vosk
         val permissionCheck = ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.RECORD_AUDIO)
@@ -118,6 +145,12 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 mapboxMap.setStyle(Style.Builder().fromUri("file://$stylePath")) { _ ->
                     statusText.text = "Offline Tactical Map Active"
                     positionCamera(packageInfo)
+                    currentLocation?.let { drawCurrentLocation(it) }
+                    selectedDestination?.let { drawDestinationMarker(it) }
+                    mapboxMap.addOnMapClickListener { point ->
+                        handleDestinationSelection(point)
+                        true
+                    }
                     Log.i(tag, "Map loaded offline successfully.")
                 }
             } catch (e: Exception) {
@@ -159,6 +192,12 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             } else {
                 transcriptionText.text = "Microphone permission denied. Voice disabled."
             }
+        } else if (requestCode == PERMISSIONS_REQUEST_LOCATION) {
+            if (grantResults.isNotEmpty() && grantResults.any { it == PackageManager.PERMISSION_GRANTED }) {
+                startLocationTracking()
+            } else {
+                statusText.text = "Offline Tactical Map Active (Location permission denied)"
+            }
         }
     }
 
@@ -176,30 +215,34 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 if (intent != null) {
                     if (intent.action == "route") {
                         transcriptionText.text = "INTENT: Route to ${intent.entity}\n\nCalculating Offline Path (GraphHopper)..."
-                        val demoRoute = buildDemoRouteRequest()
-                        if (demoRoute == null) {
-                            transcriptionText.text = "Routing blocked: offline map bounds unavailable."
+                        val routeRequestResult = buildRouteRequest()
+                        if (routeRequestResult == null) {
+                            transcriptionText.text = "Routing blocked: waiting for offline map package."
+                            return
+                        }
+                        if (routeRequestResult.errorMessage != null) {
+                            transcriptionText.text = routeRequestResult.errorMessage
+                            return
+                        }
+                        val routeRequest = routeRequestResult.coordinates ?: run {
+                            transcriptionText.text = "Routing blocked: operator GPS unavailable."
                             return
                         }
                         try {
                             val routeCoords = routingEngine.calculateRoute(
-                                demoRoute[0],
-                                demoRoute[1],
-                                demoRoute[2],
-                                demoRoute[3]
+                                routeRequest[0],
+                                routeRequest[1],
+                                routeRequest[2],
+                                routeRequest[3]
                             )
                             if (routeCoords != null) {
-                                transcriptionText.text = "Route calculated! Target: ${intent.entity}"
+                                val destinationLabel = if (selectedDestination != null) "selected point" else intent.entity
+                                transcriptionText.text = "Route calculated! Target: $destinationLabel"
                                 drawRouteOnMap(routeCoords)
+                                focusCameraOnRoute(routeCoords)
                             } else {
                                 val routingError = routingEngine.getLastError() ?: "Unknown GraphHopper error"
-                                val fallbackRoute = buildFallbackRoute(demoRoute)
-                                if (fallbackRoute != null) {
-                                    transcriptionText.text = "GraphHopper unavailable. Rendering demo route.\n$routingError"
-                                    drawRouteOnMap(fallbackRoute)
-                                } else {
-                                    transcriptionText.text = "Route calculation failed: $routingError"
-                                }
+                                transcriptionText.text = "Route calculation failed: $routingError"
                             }
                         } catch (e: Exception) {
                             Log.e(tag, "Routing engine error", e)
@@ -257,6 +300,52 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                     PropertyFactory.lineWidth(5f),
                     PropertyFactory.lineColor(Color.RED)
                 ))
+            }
+        }
+    }
+
+    private fun drawCurrentLocation(location: Location) {
+        mapboxMap?.getStyle { style ->
+            val featureCollection = FeatureCollection.fromFeatures(
+                arrayOf(Feature.fromGeometry(Point.fromLngLat(location.longitude, location.latitude)))
+            )
+
+            val source = style.getSourceAs<GeoJsonSource>(OPERATOR_SOURCE_ID)
+            if (source != null) {
+                source.setGeoJson(featureCollection)
+            } else {
+                style.addSource(GeoJsonSource(OPERATOR_SOURCE_ID, featureCollection))
+                style.addLayer(
+                    CircleLayer(OPERATOR_LAYER_ID, OPERATOR_SOURCE_ID).withProperties(
+                        PropertyFactory.circleRadius(7f),
+                        PropertyFactory.circleColor("#00BCD4"),
+                        PropertyFactory.circleStrokeColor("#FFFFFF"),
+                        PropertyFactory.circleStrokeWidth(2f)
+                    )
+                )
+            }
+        }
+    }
+
+    private fun drawDestinationMarker(destination: LatLng) {
+        mapboxMap?.getStyle { style ->
+            val featureCollection = FeatureCollection.fromFeatures(
+                arrayOf(Feature.fromGeometry(Point.fromLngLat(destination.longitude, destination.latitude)))
+            )
+
+            val source = style.getSourceAs<GeoJsonSource>(DESTINATION_SOURCE_ID)
+            if (source != null) {
+                source.setGeoJson(featureCollection)
+            } else {
+                style.addSource(GeoJsonSource(DESTINATION_SOURCE_ID, featureCollection))
+                style.addLayer(
+                    CircleLayer(DESTINATION_LAYER_ID, DESTINATION_SOURCE_ID).withProperties(
+                        PropertyFactory.circleRadius(8f),
+                        PropertyFactory.circleColor("#FF3B30"),
+                        PropertyFactory.circleStrokeColor("#FFFFFF"),
+                        PropertyFactory.circleStrokeWidth(2f)
+                    )
+                )
             }
         }
     }
@@ -367,42 +456,143 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     private fun positionCamera(packageInfo: MapPackageInfo) {
+        val location = currentLocation
+        val targetLatLng = if (location != null && isInsideOfflineBounds(location)) {
+            LatLng(location.latitude, location.longitude)
+        } else {
+            LatLng(packageInfo.centerLat, packageInfo.centerLon)
+        }
         mapboxMap?.cameraPosition = CameraPosition.Builder()
-            .target(LatLng(packageInfo.centerLat, packageInfo.centerLon))
+            .target(targetLatLng)
             .zoom(packageInfo.minZoom.toDouble())
             .build()
     }
 
-    private fun buildDemoRouteRequest(): DoubleArray? {
-        val packageInfo = mapPackageInfo ?: return null
-        val latSpan = packageInfo.bounds[3] - packageInfo.bounds[1]
-        val lonSpan = packageInfo.bounds[2] - packageInfo.bounds[0]
-        val centerLat = packageInfo.centerLat
-        val centerLon = packageInfo.centerLon
+    private data class RouteRequestResult(
+        val coordinates: DoubleArray? = null,
+        val errorMessage: String? = null
+    )
 
-        return doubleArrayOf(
-            centerLat - (latSpan * 0.05),
-            centerLon - (lonSpan * 0.05),
-            centerLat + (latSpan * 0.05),
-            centerLon + (lonSpan * 0.05)
+    private fun buildRouteRequest(): RouteRequestResult? {
+        val packageInfo = mapPackageInfo ?: return null
+        val location = currentLocation
+            ?: return RouteRequestResult(errorMessage = "Waiting for GPS fix before routing.")
+        if (!isInsideOfflineBounds(location)) {
+            return RouteRequestResult(
+                errorMessage = "Current GPS is outside the offline mission zone. Move inside the loaded area to calculate a route."
+            )
+        }
+
+        val objectivePoint = buildObjectivePoint(packageInfo)
+        return RouteRequestResult(
+            coordinates = doubleArrayOf(
+                location.latitude,
+                location.longitude,
+                objectivePoint[0],
+                objectivePoint[1]
+            )
         )
     }
 
-    private fun buildFallbackRoute(routeRequest: DoubleArray): List<DoubleArray>? {
-        if (routeRequest.size < 4) return null
-
-        val startLat = routeRequest[0]
-        val startLon = routeRequest[1]
-        val endLat = routeRequest[2]
-        val endLon = routeRequest[3]
-        val midLat = (startLat + endLat) / 2.0
-        val midLon = (startLon + endLon) / 2.0
-
-        return listOf(
-            doubleArrayOf(startLon, startLat),
-            doubleArrayOf(midLon, midLat),
-            doubleArrayOf(endLon, endLat)
+    private fun buildObjectivePoint(packageInfo: MapPackageInfo): DoubleArray {
+        selectedDestination?.let {
+            return doubleArrayOf(it.latitude, it.longitude)
+        }
+        val latSpan = packageInfo.bounds[3] - packageInfo.bounds[1]
+        val lonSpan = packageInfo.bounds[2] - packageInfo.bounds[0]
+        return doubleArrayOf(
+            packageInfo.centerLat + (latSpan * 0.05),
+            packageInfo.centerLon + (lonSpan * 0.05)
         )
+    }
+
+    private fun handleDestinationSelection(point: LatLng) {
+        if (!isInsideOfflineBounds(point)) {
+            transcriptionText.text = "Selected point is outside the offline mission zone."
+            return
+        }
+        selectedDestination = point
+        drawDestinationMarker(point)
+        transcriptionText.text = "Destination selected. Say \"route to objective\" to navigate."
+    }
+
+    private fun ensureLocationAccess() {
+        val fineGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (fineGranted || coarseGranted) {
+            startLocationTracking()
+        } else {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                PERMISSIONS_REQUEST_LOCATION
+            )
+        }
+    }
+
+    private fun startLocationTracking() {
+        if (
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+
+        val gpsLast = runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull()
+        val networkLast = runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }.getOrNull()
+        val bestLast = listOfNotNull(gpsLast, networkLast).maxByOrNull { it.time }
+        bestLast?.let {
+            currentLocation = it
+            drawCurrentLocation(it)
+            updateLocationStatus(it)
+        } ?: run {
+            statusText.text = "Offline Tactical Map Active (Waiting for GPS fix)"
+        }
+
+        runCatching {
+            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 5f, locationListener)
+            }
+            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 2000L, 5f, locationListener)
+            }
+        }.onFailure { exception ->
+            Log.e(tag, "Failed to start location tracking", exception)
+        }
+    }
+
+    private fun isInsideOfflineBounds(location: Location): Boolean {
+        val packageInfo = mapPackageInfo ?: return false
+        val lon = location.longitude
+        val lat = location.latitude
+        return lon in packageInfo.bounds[0]..packageInfo.bounds[2] &&
+            lat in packageInfo.bounds[1]..packageInfo.bounds[3]
+    }
+
+    private fun isInsideOfflineBounds(point: LatLng): Boolean {
+        val packageInfo = mapPackageInfo ?: return false
+        return point.longitude in packageInfo.bounds[0]..packageInfo.bounds[2] &&
+            point.latitude in packageInfo.bounds[1]..packageInfo.bounds[3]
+    }
+
+    private fun updateLocationStatus(location: Location) {
+        statusText.text = if (isInsideOfflineBounds(location)) {
+            "Offline Tactical Map Active"
+        } else {
+            "Offline Tactical Map Active (GPS outside mission zone)"
+        }
+    }
+
+    private fun focusCameraOnRoute(routeCoords: List<DoubleArray>) {
+        val firstPoint = routeCoords.firstOrNull() ?: return
+        val lastPoint = routeCoords.lastOrNull() ?: return
+        val targetLat = (firstPoint[1] + lastPoint[1]) / 2.0
+        val targetLon = (firstPoint[0] + lastPoint[0]) / 2.0
+        val zoom = ((mapPackageInfo?.maxZoom ?: 15) - 1).toDouble().coerceAtLeast(13.0)
+        mapboxMap?.cameraPosition = CameraPosition.Builder()
+            .target(LatLng(targetLat, targetLon))
+            .zoom(zoom)
+            .build()
     }
     
     private fun copyAssetToCache(assetName: String): String {
@@ -503,18 +693,24 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     override fun onResume() {
         super.onResume()
         mapView.onResume()
+        if (hasLocationPermission()) {
+            startLocationTracking()
+        }
+        speechService?.setPause(false)
     }
 
     override fun onPause() {
         super.onPause()
         mapView.onPause()
         speechService?.setPause(true)
+        locationManager.removeUpdates(locationListener)
     }
 
     override fun onStop() {
         super.onStop()
         mapView.onStop()
         speechService?.setPause(true)
+        locationManager.removeUpdates(locationListener)
     }
 
     override fun onLowMemory() {
@@ -533,5 +729,10 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         mapView.onSaveInstanceState(outState)
+    }
+
+    private fun hasLocationPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
     }
 }
