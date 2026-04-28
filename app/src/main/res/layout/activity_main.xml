@@ -15,17 +15,51 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:id="@+id/topHudContainer"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        android:background="#80000000"
-        android:padding="8dp"
-        android:text="Map Offline Status: Initializing..."
-        android:textColor="@color/white"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="16dp"
+        android:background="@color/tactical_card"
+        android:elevation="10dp"
+        android:orientation="vertical"
+        android:padding="14dp"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="parent">
+
+        <TextView
+            android:id="@+id/titleText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.06"
+            android:text="OFFLINE TACTICAL MAP"
+            android:textAllCaps="true"
+            android:textColor="@color/tactical_warning"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Map Offline Status: Initializing..."
+            android:textColor="@color/tactical_on_dark"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/statusHintText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Voice, GPS, and offline routing stay on-device."
+            android:textColor="@color/tactical_muted"
+            android:textSize="12sp" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/routeSummaryText"
@@ -33,29 +67,62 @@
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="16dp"
         android:layout_marginTop="12dp"
-        android:background="#A60A1A20"
-        android:padding="12dp"
+        android:background="@color/tactical_card_alt"
+        android:elevation="8dp"
+        android:fontFamily="monospace"
+        android:padding="14dp"
         android:text="Route summary will appear here."
-        android:textColor="#EAF7FA"
-        android:textSize="15sp"
+        android:textColor="@color/tactical_on_dark"
+        android:textSize="14sp"
         android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/statusText" />
+        app:layout_constraintTop_toBottomOf="@id/topHudContainer" />
 
-    <TextView
-        android:id="@+id/transcriptionText"
+    <LinearLayout
+        android:id="@+id/bottomHudContainer"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        android:background="#A6000000"
-        android:padding="12dp"
-        android:text="Listening for tactical commands..."
-        android:textColor="#03DAC5"
-        android:textSize="16sp"
-        android:textStyle="bold"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="16dp"
+        android:background="@color/tactical_card"
+        android:elevation="10dp"
+        android:orientation="vertical"
+        android:padding="14dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        app:layout_constraintStart_toStartOf="parent">
+
+        <TextView
+            android:id="@+id/commandHintText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.05"
+            android:text="VOICE COMMAND FEED"
+            android:textAllCaps="true"
+            android:textColor="@color/tactical_warning"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/transcriptionText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Listening for tactical commands..."
+            android:textColor="@color/tactical_secondary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/commandExamplesText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Try: route to objective • clear route • recenter on me"
+            android:textColor="@color/tactical_muted"
+            android:textSize="12sp" />
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
