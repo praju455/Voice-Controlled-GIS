@@ -55,6 +55,10 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private var currentLocation: Location? = null
     private var hasCenteredOnOperator = false
     private var selectedDestination: LatLng? = null
+    private var activeRouteCoords: List<DoubleArray>? = null
+    private var activeRouteTotalDistanceMeters: Double = 0.0
+    private var activeRouteTotalDurationMillis: Long = 0L
+    private var activeRouteDestinationLabel: String? = null
 
     private var speechService: SpeechService? = null
     private var model: Model? = null
@@ -65,6 +69,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         currentLocation = location
         drawCurrentLocation(location)
         updateLocationStatus(location)
+        updateActiveRouteProgress()
         if (!hasCenteredOnOperator && isInsideOfflineBounds(location)) {
             mapboxMap?.cameraPosition = CameraPosition.Builder()
                 .target(LatLng(location.latitude, location.longitude))
@@ -253,8 +258,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                                 val destinationLabel = routeRequestResult.destinationLabel
                                 transcriptionText.text = "Route calculated! Target: $destinationLabel"
                                 drawRouteOnMap(routeResult.coordinates)
+                                setActiveRoute(routeResult, destinationLabel)
                                 focusCameraOnRoute(routeResult.coordinates)
-                                updateRouteSummary(routeResult, destinationLabel)
+                                updateActiveRouteProgress()
                             } else {
                                 val routingError = routingEngine.getLastError() ?: "Unknown GraphHopper error"
                                 transcriptionText.text = "Route calculation failed: $routingError"
@@ -591,6 +597,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             val source = style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID) ?: return@getStyle
             source.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
         }
+        clearActiveRoute()
         clearRouteSummary()
     }
 
@@ -689,6 +696,75 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         routeSummaryText.visibility = View.VISIBLE
     }
 
+    private fun setActiveRoute(routeResult: TacticalRouterEngine.RouteResult, destinationLabel: String) {
+        activeRouteCoords = routeResult.coordinates
+        activeRouteTotalDistanceMeters = routeResult.distanceMeters
+        activeRouteTotalDurationMillis = routeResult.durationMillis
+        activeRouteDestinationLabel = destinationLabel
+    }
+
+    private fun clearActiveRoute() {
+        activeRouteCoords = null
+        activeRouteTotalDistanceMeters = 0.0
+        activeRouteTotalDurationMillis = 0L
+        activeRouteDestinationLabel = null
+    }
+
+    private fun updateActiveRouteProgress() {
+        val routeCoords = activeRouteCoords ?: return
+        val location = currentLocation ?: return
+        if (routeCoords.size < 2) return
+
+        val nearestIndex = findNearestRouteIndex(location, routeCoords)
+        val remainingDistanceMeters = calculateRemainingDistanceMeters(location, routeCoords, nearestIndex)
+        val remainingRatio = if (activeRouteTotalDistanceMeters > 0.0) {
+            (remainingDistanceMeters / activeRouteTotalDistanceMeters).coerceIn(0.0, 1.0)
+        } else {
+            1.0
+        }
+        val remainingDurationMillis = (activeRouteTotalDurationMillis * remainingRatio).toLong()
+        val totalDistanceText = formatDistance(activeRouteTotalDistanceMeters)
+        val remainingDistanceText = formatDistance(remainingDistanceMeters)
+        val etaText = formatDuration(remainingDurationMillis)
+        val destinationLabel = activeRouteDestinationLabel ?: "objective"
+
+        routeSummaryText.text = buildString {
+            append("Destination: ").append(destinationLabel)
+            append("\nRemaining: ").append(remainingDistanceText)
+            append("\nETA: ").append(etaText)
+            append("\nTotal Route: ").append(totalDistanceText)
+        }
+        routeSummaryText.visibility = View.VISIBLE
+    }
+
+    private fun findNearestRouteIndex(location: Location, routeCoords: List<DoubleArray>): Int {
+        var nearestIndex = 0
+        var nearestDistance = Double.MAX_VALUE
+        routeCoords.forEachIndexed { index, coord ->
+            val distance = distanceBetweenMeters(location.latitude, location.longitude, coord[1], coord[0])
+            if (distance < nearestDistance) {
+                nearestDistance = distance
+                nearestIndex = index
+            }
+        }
+        return nearestIndex
+    }
+
+    private fun calculateRemainingDistanceMeters(
+        location: Location,
+        routeCoords: List<DoubleArray>,
+        nearestIndex: Int
+    ): Double {
+        val nearestCoord = routeCoords[nearestIndex]
+        var remaining = distanceBetweenMeters(location.latitude, location.longitude, nearestCoord[1], nearestCoord[0])
+        for (index in nearestIndex until routeCoords.lastIndex) {
+            val start = routeCoords[index]
+            val end = routeCoords[index + 1]
+            remaining += distanceBetweenMeters(start[1], start[0], end[1], end[0])
+        }
+        return remaining
+    }
+
     private fun clearRouteSummary() {
         routeSummaryText.visibility = View.GONE
         routeSummaryText.text = ""
@@ -711,6 +787,12 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             hours > 0L -> "${hours}h"
             else -> "${minutes} min"
         }
+    }
+
+    private fun distanceBetweenMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val result = FloatArray(1)
+        Location.distanceBetween(lat1, lon1, lat2, lon2, result)
+        return result[0].toDouble()
     }
 
     private fun recenterOnOperator(): Boolean {
