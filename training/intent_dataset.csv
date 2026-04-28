@@ -1,0 +1,288 @@
+text,label
+"route to objective",route
+"route objective",route
+"route to the objective",route
+"navigate to objective",route
+"go to objective",route
+"path to objective",route
+"take me to objective",route
+"route me to objective",route
+"navigate me to objective",route
+"show route to objective",route
+"find route to objective",route
+"please route to objective",route
+"please navigate to objective",route
+"can you route to objective",route
+"help me route to objective",route
+"route to target",route
+"route target",route
+"navigate to target",route
+"go to target",route
+"path to target",route
+"take me to target",route
+"route me to target",route
+"navigate me to target",route
+"find route to target",route
+"please route to target",route
+"please navigate to target",route
+"can you route to target",route
+"help me route to target",route
+"route to selected point",route
+"navigate to selected point",route
+"go to selected point",route
+"path to selected point",route
+"route me to selected point",route
+"take me to selected point",route
+"please route to selected point",route
+"please navigate to selected point",route
+"route to destination",route
+"navigate to destination",route
+"go to destination",route
+"path to destination",route
+"take me to destination",route
+"route me to destination",route
+"find route to destination",route
+"please route to destination",route
+"route to hospital",route
+"navigate to hospital",route
+"go to hospital",route
+"path to hospital",route
+"take me to hospital",route
+"route me to hospital",route
+"find route to hospital",route
+"please route to hospital",route
+"please navigate to hospital",route
+"can you route to hospital",route
+"route to the hospital",route
+"navigate to the hospital",route
+"go to the hospital",route
+"take me to the hospital",route
+"route to airport",route
+"navigate to airport",route
+"go to airport",route
+"path to airport",route
+"take me to airport",route
+"route me to airport",route
+"find route to airport",route
+"please route to airport",route
+"please navigate to airport",route
+"route to the airport",route
+"navigate to the airport",route
+"go to the airport",route
+"route to police",route
+"navigate to police",route
+"go to police",route
+"path to police",route
+"take me to police",route
+"route me to police",route
+"find route to police",route
+"please route to police",route
+"please navigate to police",route
+"route to nearest police",route
+"navigate to nearest police",route
+"go to nearest police",route
+"route to checkpoint",route
+"navigate to checkpoint",route
+"go to checkpoint",route
+"path to checkpoint",route
+"take me to checkpoint",route
+"route me to checkpoint",route
+"find route to checkpoint",route
+"please route to checkpoint",route
+"route to safe zone",route
+"navigate to safe zone",route
+"go to safe zone",route
+"path to safe zone",route
+"take me to safe zone",route
+"route me to safe zone",route
+"find route to safe zone",route
+"please route to safe zone",route
+"route to extraction point",route
+"navigate to extraction point",route
+"go to extraction point",route
+"path to extraction point",route
+"take me to extraction point",route
+"route me to extraction point",route
+"find route to extraction point",route
+"please route to extraction point",route
+"root to objective",route
+"root to target",route
+"root to hospital",route
+"root to airport",route
+"root to police",route
+"route to hebbal",route
+"navigate to hebbal",route
+"go to hebbal",route
+"take me to hebbal",route
+"route me to hebbal",route
+"route to yelahanka",route
+"navigate to yelahanka",route
+"go to yelahanka",route
+"take me to yelahanka",route
+"route me to yelahanka",route
+"clear route",clear_route
+"clear the route",clear_route
+"remove route",clear_route
+"remove the route",clear_route
+"delete route",clear_route
+"delete the route",clear_route
+"reset route",clear_route
+"reset the route",clear_route
+"please clear route",clear_route
+"please clear the route",clear_route
+"can you clear route",clear_route
+"can you clear the route",clear_route
+"clear current route",clear_route
+"remove current route",clear_route
+"delete current route",clear_route
+"reset current route",clear_route
+"clear active route",clear_route
+"remove active route",clear_route
+"delete active route",clear_route
+"reset active route",clear_route
+"clear my route",clear_route
+"remove my route",clear_route
+"delete my route",clear_route
+"reset my route",clear_route
+"clear the current route",clear_route
+"remove the current route",clear_route
+"delete the current route",clear_route
+"reset the current route",clear_route
+"clear the active route",clear_route
+"remove the active route",clear_route
+"delete the active route",clear_route
+"reset the active route",clear_route
+"please remove the route",clear_route
+"please delete the route",clear_route
+"please reset the route",clear_route
+"help me clear the route",clear_route
+"help me remove the route",clear_route
+"help me delete the route",clear_route
+"clear destination",clear_destination
+"clear the destination",clear_destination
+"remove destination",clear_destination
+"remove the destination",clear_destination
+"delete destination",clear_destination
+"delete the destination",clear_destination
+"reset destination",clear_destination
+"reset the destination",clear_destination
+"clear marker",clear_destination
+"clear the marker",clear_destination
+"remove marker",clear_destination
+"remove the marker",clear_destination
+"delete marker",clear_destination
+"delete the marker",clear_destination
+"reset marker",clear_destination
+"reset the marker",clear_destination
+"clear target",clear_destination
+"clear the target",clear_destination
+"remove target",clear_destination
+"remove the target",clear_destination
+"delete target",clear_destination
+"delete the target",clear_destination
+"reset target",clear_destination
+"reset the target",clear_destination
+"clear objective",clear_destination
+"clear the objective",clear_destination
+"remove objective",clear_destination
+"remove the objective",clear_destination
+"delete objective",clear_destination
+"delete the objective",clear_destination
+"reset objective",clear_destination
+"reset the objective",clear_destination
+"please clear destination",clear_destination
+"please remove destination",clear_destination
+"please delete destination",clear_destination
+"can you clear the destination",clear_destination
+"can you remove the marker",clear_destination
+"help me clear the destination",clear_destination
+"recenter",recenter
+"recenter on me",recenter
+"recenter to me",recenter
+"center on me",recenter
+"centre on me",recenter
+"center me",recenter
+"centre me",recenter
+"recenter map",recenter
+"recenter the map",recenter
+"center the map on me",recenter
+"centre the map on me",recenter
+"move map to me",recenter
+"move the map to me",recenter
+"bring me to center",recenter
+"bring map to my location",recenter
+"focus on me",recenter
+"focus map on me",recenter
+"show my location",recenter
+"go to my location",recenter
+"return to my location",recenter
+"back to my location",recenter
+"recenter please",recenter
+"please recenter",recenter
+"please recenter on me",recenter
+"can you recenter on me",recenter
+"help me recenter",recenter
+"center on my location",recenter
+"centre on my location",recenter
+"focus on my position",recenter
+"move to my position",recenter
+"show hostiles within 5 kilometers",show_entities
+"show hostiles within 3 kilometers",show_entities
+"show hostiles within 2 kilometers",show_entities
+"show hostiles within 1 kilometer",show_entities
+"show hostiles at 500 meters",show_entities
+"show hostiles at 300 meters",show_entities
+"show hostiles at 100 meters",show_entities
+"display hostiles within 5 kilometers",show_entities
+"display hostiles within 2 kilometers",show_entities
+"display hostiles at 500 meters",show_entities
+"identify hostiles within 5 kilometers",show_entities
+"identify hostiles within 2 kilometers",show_entities
+"identify hostiles at 500 meters",show_entities
+"view hostiles within 5 kilometers",show_entities
+"view hostiles within 2 kilometers",show_entities
+"view hostiles at 500 meters",show_entities
+"find hostiles within 5 kilometers",show_entities
+"find hostiles within 2 kilometers",show_entities
+"find hostiles at 500 meters",show_entities
+"sure hostiles within 5 kilometers",show_entities
+"sure hostiles within 2 kilometers",show_entities
+"sure hostiles at 500 meters",show_entities
+"show enemies within 5 kilometers",show_entities
+"show enemies within 2 kilometers",show_entities
+"show enemies at 500 meters",show_entities
+"display enemies within 5 kilometers",show_entities
+"display enemies within 2 kilometers",show_entities
+"identify enemies at 500 meters",show_entities
+"view enemies within 1 kilometer",show_entities
+"find enemies at 300 meters",show_entities
+"show vehicles within 5 kilometers",show_entities
+"show vehicles within 2 kilometers",show_entities
+"show vehicles at 500 meters",show_entities
+"display vehicles within 5 kilometers",show_entities
+"display vehicles within 2 kilometers",show_entities
+"identify vehicles at 500 meters",show_entities
+"view vehicles within 1 kilometer",show_entities
+"find vehicles at 300 meters",show_entities
+"show targets within 5 kilometers",show_entities
+"show targets within 2 kilometers",show_entities
+"show targets at 500 meters",show_entities
+"display targets within 5 kilometers",show_entities
+"display targets within 2 kilometers",show_entities
+"identify targets at 500 meters",show_entities
+"view targets within 1 kilometer",show_entities
+"find targets at 300 meters",show_entities
+"show friendlies within 5 kilometers",show_entities
+"show friendlies within 2 kilometers",show_entities
+"show friendlies at 500 meters",show_entities
+"display friendlies within 5 kilometers",show_entities
+"display friendlies within 2 kilometers",show_entities
+"identify friendlies at 500 meters",show_entities
+"view friendlies within 1 kilometer",show_entities
+"find friendlies at 300 meters",show_entities
+"show hostiles in 5 kilometers",show_entities
+"show hostiles in 2 kilometers",show_entities
+"show hostiles in 500 meters",show_entities
+"display vehicles in 2 kilometers",show_entities
+"identify enemies in 500 meters",show_entities
+"find targets in 300 meters",show_entities
