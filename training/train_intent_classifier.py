@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
-"""
-Train a lightweight TFLite intent classifier for the Android app.
+"""Train a lightweight TFLite intent classifier for the Android app.
 
-This script intentionally uses a plain TensorFlow/Keras pipeline so the
-project has a self-contained starting point. It trains a small text model,
-converts it to TFLite, and writes labels/summary artifacts.
-
-Note:
-The Android app currently loads the output using TensorFlow Lite Task
-NLClassifier. Depending on your final TensorFlow/TFLite setup, you may later
-choose to swap this pipeline to Model Maker or add TFLite metadata tooling.
-This script is the fastest practical scaffold for experimentation.
+This version avoids string-processing ops inside the exported model so the
+resulting `.tflite` is easier to run directly on Android. Tokenization is done
+outside the model both during training and at inference time in Kotlin.
 """
 
 from __future__ import annotations
@@ -18,12 +11,15 @@ from __future__ import annotations
 import json
 import math
 import random
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.preprocessing.text import Tokenizer
 
 
 ROOT = Path(__file__).resolve().parent
@@ -32,6 +28,7 @@ OUTPUT_DIR = ROOT / "output"
 SAVED_MODEL_DIR = OUTPUT_DIR / "nlp_intent_saved_model"
 TFLITE_PATH = OUTPUT_DIR / "nlp_intent.tflite"
 LABELS_PATH = OUTPUT_DIR / "labels.txt"
+VOCAB_PATH = OUTPUT_DIR / "vocab.json"
 SUMMARY_PATH = OUTPUT_DIR / "training_summary.json"
 
 SEED = 42
@@ -58,13 +55,20 @@ def set_seed(seed: int = SEED) -> None:
     tf.random.set_seed(seed)
 
 
+def normalize_text(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"[^a-z0-9\s]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def load_dataset() -> DatasetBundle:
     df = pd.read_csv(DATASET_PATH)
     if set(df.columns) != {"text", "label"}:
         raise ValueError("Dataset must contain exactly 'text' and 'label' columns.")
 
     df = df.dropna().copy()
-    df["text"] = df["text"].astype(str).str.strip()
+    df["text"] = df["text"].astype(str).map(normalize_text)
     df["label"] = df["label"].astype(str).str.strip()
     df = df[(df["text"] != "") & (df["label"] != "")]
 
@@ -96,20 +100,27 @@ def load_dataset() -> DatasetBundle:
     )
 
 
-def build_vectorizer(train_texts: list[str]) -> tf.keras.layers.TextVectorization:
-    vectorizer = tf.keras.layers.TextVectorization(
-        max_tokens=VOCAB_SIZE,
-        output_mode="int",
-        output_sequence_length=SEQUENCE_LENGTH,
-        standardize="lower_and_strip_punctuation",
+def build_tokenizer(train_texts: list[str]) -> Tokenizer:
+    tokenizer = Tokenizer(num_words=VOCAB_SIZE, oov_token="<OOV>")
+    tokenizer.fit_on_texts(train_texts)
+    return tokenizer
+
+
+def vectorize_texts(tokenizer: Tokenizer, texts: list[str]) -> np.ndarray:
+    sequences = tokenizer.texts_to_sequences(texts)
+    padded = pad_sequences(
+        sequences,
+        maxlen=SEQUENCE_LENGTH,
+        padding="post",
+        truncating="post",
+        value=0,
     )
-    vectorizer.adapt(tf.data.Dataset.from_tensor_slices(train_texts).batch(BATCH_SIZE))
-    return vectorizer
+    return padded.astype(np.int32)
 
 
-def build_model(vectorizer: tf.keras.layers.TextVectorization, num_labels: int) -> tf.keras.Model:
-    inputs = tf.keras.Input(shape=(1,), dtype=tf.string, name="text")
-    x = vectorizer(inputs)
+def build_model(num_labels: int) -> tf.keras.Model:
+    inputs = tf.keras.Input(shape=(SEQUENCE_LENGTH,), dtype=tf.int32, name="token_ids")
+    x = inputs
     x = tf.keras.layers.Embedding(VOCAB_SIZE, EMBEDDING_DIM, name="embedding")(x)
     x = tf.keras.layers.GlobalAveragePooling1D()(x)
     x = tf.keras.layers.Dropout(0.2)(x)
@@ -125,9 +136,14 @@ def build_model(vectorizer: tf.keras.layers.TextVectorization, num_labels: int) 
     return model
 
 
-def build_datasets(bundle: DatasetBundle) -> tuple[tf.data.Dataset, tf.data.Dataset]:
-    train_ds = tf.data.Dataset.from_tensor_slices((bundle.train_texts, bundle.train_labels))
-    val_ds = tf.data.Dataset.from_tensor_slices((bundle.val_texts, bundle.val_labels))
+def build_datasets(
+    train_inputs: np.ndarray,
+    train_labels: np.ndarray,
+    val_inputs: np.ndarray,
+    val_labels: np.ndarray,
+) -> tuple[tf.data.Dataset, tf.data.Dataset]:
+    train_ds = tf.data.Dataset.from_tensor_slices((train_inputs, train_labels))
+    val_ds = tf.data.Dataset.from_tensor_slices((val_inputs, val_labels))
     train_ds = train_ds.shuffle(len(bundle.train_texts), seed=SEED).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
     val_ds = val_ds.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
     return train_ds, val_ds
@@ -145,10 +161,21 @@ def convert_to_tflite() -> bytes:
     return converter.convert()
 
 
-def write_outputs(bundle: DatasetBundle, history: tf.keras.callbacks.History, tflite_bytes: bytes) -> None:
+def write_outputs(
+    bundle: DatasetBundle,
+    tokenizer: Tokenizer,
+    history: tf.keras.callbacks.History,
+    tflite_bytes: bytes,
+) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     TFLITE_PATH.write_bytes(tflite_bytes)
     LABELS_PATH.write_text("\n".join(bundle.labels) + "\n", encoding="utf-8")
+    vocab = {
+        token: index
+        for token, index in tokenizer.word_index.items()
+        if index < VOCAB_SIZE
+    }
+    VOCAB_PATH.write_text(json.dumps(vocab, indent=2, sort_keys=True), encoding="utf-8")
 
     summary = {
         "dataset_path": str(DATASET_PATH),
@@ -161,7 +188,10 @@ def write_outputs(bundle: DatasetBundle, history: tf.keras.callbacks.History, tf
         "history": history.history,
         "output_tflite": str(TFLITE_PATH),
         "labels_file": str(LABELS_PATH),
+        "vocab_file": str(VOCAB_PATH),
         "saved_model_dir": str(SAVED_MODEL_DIR),
+        "sequence_length": SEQUENCE_LENGTH,
+        "vocab_size": VOCAB_SIZE,
     }
     SUMMARY_PATH.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
@@ -171,9 +201,11 @@ def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     bundle = load_dataset()
-    vectorizer = build_vectorizer(bundle.train_texts)
-    model = build_model(vectorizer, num_labels=len(bundle.labels))
-    train_ds, val_ds = build_datasets(bundle)
+    tokenizer = build_tokenizer(bundle.train_texts)
+    train_inputs = vectorize_texts(tokenizer, bundle.train_texts)
+    val_inputs = vectorize_texts(tokenizer, bundle.val_texts)
+    model = build_model(num_labels=len(bundle.labels))
+    train_ds, val_ds = build_datasets(train_inputs, bundle.train_labels, val_inputs, bundle.val_labels)
 
     callbacks = [
         tf.keras.callbacks.EarlyStopping(
@@ -193,15 +225,16 @@ def main() -> None:
 
     export_saved_model(model)
     tflite_bytes = convert_to_tflite()
-    write_outputs(bundle, history, tflite_bytes)
+    write_outputs(bundle, tokenizer, history, tflite_bytes)
 
     print("Training complete.")
     print(f"TFLite model: {TFLITE_PATH}")
     print(f"Labels file:   {LABELS_PATH}")
+    print(f"Vocab file:    {VOCAB_PATH}")
     print(f"Summary file:  {SUMMARY_PATH}")
     print()
     print("Next step:")
-    print("Copy training/output/nlp_intent.tflite to app/src/main/assets/models/")
+    print("Copy training/output/nlp_intent.tflite, labels.txt, and vocab.json to app/src/main/assets/models/")
 
 
 if __name__ == "__main__":

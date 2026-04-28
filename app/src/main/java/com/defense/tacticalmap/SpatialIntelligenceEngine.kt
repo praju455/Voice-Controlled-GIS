@@ -2,8 +2,13 @@ package com.defense.tacticalmap
 
 import android.content.Context
 import android.util.Log
-import org.tensorflow.lite.task.text.nlclassifier.NLClassifier
+import org.json.JSONObject
+import org.tensorflow.lite.Interpreter
+import java.io.FileInputStream
 import java.io.IOException
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
+import kotlin.math.min
 
 data class TacticalIntent(
     val action: String,
@@ -14,9 +19,12 @@ data class TacticalIntent(
 
 class SpatialIntelligenceEngine(private val context: Context) {
     private val tag = "SpatialIntelligence"
-    private var nlClassifier: NLClassifier? = null
     private val classifierAssetPath = "models/nlp_intent.tflite"
+    private val classifierLabelsAssetPath = "models/nlp_intent_labels.txt"
+    private val classifierVocabAssetPath = "models/nlp_intent_vocab.json"
     private val classifierScoreThreshold = 0.55f
+    private val classifierSequenceLength = 40
+    private var tfliteIntentClassifier: TfliteIntentClassifier? = null
 
     init {
         Log.d(tag, "Initializing spatial engine with context: $context")
@@ -26,14 +34,22 @@ class SpatialIntelligenceEngine(private val context: Context) {
     private fun initNLClassifier() {
         try {
             context.assets.open(classifierAssetPath).close()
-            nlClassifier = NLClassifier.createFromFile(context, classifierAssetPath)
-            Log.i(tag, "Loaded TFLite intent classifier from $classifierAssetPath")
+            context.assets.open(classifierLabelsAssetPath).close()
+            context.assets.open(classifierVocabAssetPath).close()
+            tfliteIntentClassifier = TfliteIntentClassifier(
+                context = context,
+                modelAssetPath = classifierAssetPath,
+                labelsAssetPath = classifierLabelsAssetPath,
+                vocabAssetPath = classifierVocabAssetPath,
+                sequenceLength = classifierSequenceLength
+            )
+            Log.i(tag, "Loaded TFLite intent classifier bundle from $classifierAssetPath")
         } catch (e: IOException) {
-            Log.i(tag, "No TFLite intent model found at $classifierAssetPath, continuing with regex fallback.")
-            nlClassifier = null
+            Log.i(tag, "No TFLite intent model bundle found, continuing with regex fallback.")
+            tfliteIntentClassifier = null
         } catch (e: Exception) {
-            Log.e(tag, "Error initializing TFLite NLClassifier", e)
-            nlClassifier = null
+            Log.e(tag, "Error initializing TFLite intent classifier", e)
+            tfliteIntentClassifier = null
         }
     }
 
@@ -100,10 +116,9 @@ class SpatialIntelligenceEngine(private val context: Context) {
     }
 
     private fun classifyWithTflite(voiceInput: String): TacticalIntent? {
-        val classifier = nlClassifier ?: return null
+        val classifier = tfliteIntentClassifier ?: return null
         return try {
-            val results = classifier.classify(voiceInput)
-            val topCategory = results.maxByOrNull { category -> category.score } ?: return null
+            val topCategory = classifier.classify(voiceInput) ?: return null
             if (topCategory.score < classifierScoreThreshold) {
                 Log.d(tag, "TFLite top score below threshold: ${topCategory.label} -> ${topCategory.score}")
                 return null
@@ -180,5 +195,78 @@ class SpatialIntelligenceEngine(private val context: Context) {
         
         // Process cursor -> Emit GeoJSON to MapLibre
         */
+    }
+}
+
+private data class ClassificationResult(val label: String, val score: Float)
+
+private class TfliteIntentClassifier(
+    context: Context,
+    modelAssetPath: String,
+    labelsAssetPath: String,
+    vocabAssetPath: String,
+    private val sequenceLength: Int
+) {
+    private val interpreter: Interpreter
+    private val labels: List<String>
+    private val vocab: Map<String, Int>
+
+    init {
+        interpreter = Interpreter(loadModelFile(context, modelAssetPath))
+        labels = context.assets.open(labelsAssetPath).bufferedReader().useLines { lines ->
+            lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        }
+        val vocabJson = context.assets.open(vocabAssetPath).bufferedReader().use { it.readText() }
+        val jsonObject = JSONObject(vocabJson)
+        val map = mutableMapOf<String, Int>()
+        jsonObject.keys().forEach { key ->
+            map[key] = jsonObject.getInt(key)
+        }
+        vocab = map
+    }
+
+    fun classify(text: String): ClassificationResult? {
+        if (labels.isEmpty()) return null
+        val input = arrayOf(tokenize(text))
+        val output = Array(1) { FloatArray(labels.size) }
+        interpreter.run(input, output)
+        val scores = output[0]
+        var bestIndex = 0
+        var bestScore = scores[0]
+        for (i in 1 until scores.size) {
+            if (scores[i] > bestScore) {
+                bestScore = scores[i]
+                bestIndex = i
+            }
+        }
+        return ClassificationResult(labels[bestIndex], bestScore)
+    }
+
+    private fun tokenize(text: String): IntArray {
+        val normalized = text
+            .lowercase()
+            .replace(Regex("[^a-z0-9\\s]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        val tokens = if (normalized.isBlank()) emptyList() else normalized.split(" ")
+        val result = IntArray(sequenceLength)
+        val oovTokenId = vocab["<OOV>"] ?: 1
+        val usableCount = min(tokens.size, sequenceLength)
+        for (i in 0 until usableCount) {
+            result[i] = vocab[tokens[i]] ?: oovTokenId
+        }
+        return result
+    }
+
+    private fun loadModelFile(context: Context, assetPath: String): MappedByteBuffer {
+        val fileDescriptor = context.assets.openFd(assetPath)
+        FileInputStream(fileDescriptor.fileDescriptor).use { inputStream ->
+            val fileChannel = inputStream.channel
+            return fileChannel.map(
+                FileChannel.MapMode.READ_ONLY,
+                fileDescriptor.startOffset,
+                fileDescriptor.declaredLength
+            )
+        }
     }
 }

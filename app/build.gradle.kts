@@ -68,6 +68,7 @@ dependencies {
     
     // Offline SpatiaLite SQLite wrapper and TFLite
     implementation("androidx.sqlite:sqlite:2.4.0")
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
     implementation("org.tensorflow:tensorflow-lite-task-text:0.4.4")
     
     // GraphHopper for Offline Routing

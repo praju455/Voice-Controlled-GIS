@@ -7,7 +7,7 @@ offline command-intent model used by:
 
 ## Goal
 
-Train a TensorFlow Lite text classifier that outputs one of these labels:
+Train a TensorFlow Lite intent classifier that outputs one of these labels:
 
 - `route`
 - `clear_route`
@@ -15,12 +15,14 @@ Train a TensorFlow Lite text classifier that outputs one of these labels:
 - `recenter`
 - `show_entities`
 
-The exported model should be copied to:
+The exported model assets should be copied to:
 
 - `/app/src/main/assets/models/nlp_intent.tflite`
+- `/app/src/main/assets/models/nlp_intent_labels.txt`
+- `/app/src/main/assets/models/nlp_intent_vocab.json`
 
-Once that file exists, the app will prefer TFLite intent classification and
-fall back to regex when the model is missing or fails.
+Once those files exist, the app will prefer TFLite intent classification and
+fall back to regex when the model bundle is missing or fails.
 
 ## Files
 
@@ -35,7 +37,7 @@ The easiest path is:
 
 1. Create a Python environment with TensorFlow installed
 2. Run `train_intent_classifier.py`
-3. Copy the exported `nlp_intent.tflite` into the Android assets folder
+3. Copy the exported model bundle into the Android assets folder
 4. Rebuild and test on device
 
 ## Local Training Example
@@ -55,6 +57,7 @@ The training script writes to:
 - `training/output/nlp_intent_saved_model/`
 - `training/output/nlp_intent.tflite`
 - `training/output/labels.txt`
+- `training/output/vocab.json`
 - `training/output/training_summary.json`
 
 ## Install Into The App
@@ -63,6 +66,8 @@ After training:
 
 ```bash
 cp training/output/nlp_intent.tflite app/src/main/assets/models/nlp_intent.tflite
+cp training/output/labels.txt app/src/main/assets/models/nlp_intent_labels.txt
+cp training/output/vocab.json app/src/main/assets/models/nlp_intent_vocab.json
 ./gradlew assembleDebug
 ```
 
