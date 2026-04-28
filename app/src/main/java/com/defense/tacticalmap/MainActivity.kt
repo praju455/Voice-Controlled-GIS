@@ -7,6 +7,8 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.widget.TextView
@@ -111,6 +113,11 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         
         spatialEngine = SpatialIntelligenceEngine(this)
         placeIndex = OfflinePlaceIndex(this)
+        placeIndex.preloadAsync {
+            Handler(Looper.getMainLooper()).post {
+                Log.i(tag, "Offline place index ready.")
+            }
+        }
         
         unpackGraphHopperAssets()
         val routingCache = File(cacheDir, "graphhopper-cache").absolutePath
@@ -537,6 +544,16 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             }
             val objectivePoint = buildObjectivePoint(packageInfo)
             return ResolvedDestination(objectivePoint[0], objectivePoint[1], "objective")
+        }
+
+        if (!placeIndex.isReady()) {
+            val loadError = placeIndex.getLoadError()
+            if (loadError != null) {
+                transcriptionText.text = "Offline place index failed to load: $loadError"
+            } else {
+                transcriptionText.text = "Offline place index is still loading. Try the destination command again in a moment."
+            }
+            return null
         }
 
         val placeMatch = placeIndex.resolve(destinationPhrase, currentLocation) ?: return null

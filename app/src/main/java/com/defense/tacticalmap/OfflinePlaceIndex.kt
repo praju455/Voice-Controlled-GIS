@@ -3,6 +3,7 @@ package com.defense.tacticalmap
 import android.content.Context
 import android.location.Location
 import org.json.JSONArray
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -36,36 +37,70 @@ class OfflinePlaceIndex(private val context: Context) {
         "university" to listOf("university", "campus", "college")
     )
 
-    private val places: List<PlaceRecord> by lazy { loadPlaces() }
+    @Volatile
+    private var places: List<PlaceRecord>? = null
+    private val loading = AtomicBoolean(false)
+    @Volatile
+    private var loadError: String? = null
+
+    fun preloadAsync(onLoaded: (() -> Unit)? = null) {
+        if (places != null) {
+            onLoaded?.invoke()
+            return
+        }
+        if (!loading.compareAndSet(false, true)) {
+            return
+        }
+        Thread {
+            try {
+                places = loadPlaces()
+                loadError = null
+            } catch (exception: Exception) {
+                loadError = exception.message ?: "Unknown place index load error"
+            } finally {
+                loading.set(false)
+                onLoaded?.invoke()
+            }
+        }.start()
+    }
+
+    fun isReady(): Boolean = places != null
+
+    fun getLoadError(): String? = loadError
 
     fun resolve(query: String, currentLocation: Location?): PlaceMatch? {
+        val localPlaces = places ?: return null
         val normalizedQuery = normalize(query)
         if (normalizedQuery.isBlank()) return null
 
         val nearestPhrase = extractNearestCategory(normalizedQuery)
         if (nearestPhrase != null) {
-            val nearest = resolveNearestByCategory(nearestPhrase, currentLocation)
+            val nearest = resolveNearestByCategory(localPlaces, nearestPhrase, currentLocation)
             if (nearest != null) return nearest
         }
 
-        val exactName = places.filter { it.normalizedName == normalizedQuery }
+        val exactName = localPlaces.filter { it.normalizedName == normalizedQuery }
         pickBest(exactName, currentLocation)?.let { return it }
 
-        val prefixName = places.filter { it.normalizedName.startsWith(normalizedQuery) }
+        val prefixName = localPlaces.filter { it.normalizedName.startsWith(normalizedQuery) }
         pickBest(prefixName, currentLocation)?.let { return it }
 
-        val containsName = places.filter { it.normalizedName.contains(normalizedQuery) }
+        val containsName = localPlaces.filter { it.normalizedName.contains(normalizedQuery) }
         pickBest(containsName, currentLocation)?.let { return it }
 
-        val categoryMatch = resolveNearestByCategory(normalizedQuery, currentLocation)
+        val categoryMatch = resolveNearestByCategory(localPlaces, normalizedQuery, currentLocation)
         if (categoryMatch != null) return categoryMatch
 
         return null
     }
 
-    private fun resolveNearestByCategory(query: String, currentLocation: Location?): PlaceMatch? {
+    private fun resolveNearestByCategory(
+        localPlaces: List<PlaceRecord>,
+        query: String,
+        currentLocation: Location?
+    ): PlaceMatch? {
         val expandedTerms = expandCategoryTerms(query)
-        val categoryCandidates = places.filter { place ->
+        val categoryCandidates = localPlaces.filter { place ->
             expandedTerms.any { term ->
                 place.categoryValue.contains(term) ||
                     place.categoryKey.contains(term) ||
