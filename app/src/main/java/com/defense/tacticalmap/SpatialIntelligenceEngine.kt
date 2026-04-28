@@ -61,11 +61,6 @@ class SpatialIntelligenceEngine(private val context: Context) {
         val lowerInput = voiceInput.lowercase().trim()
         Log.d(tag, "Parsing voice input: $lowerInput")
 
-        classifyWithTflite(voiceInput)?.let { tfliteIntent ->
-            Log.i(tag, "TFLite parsed intent successfully: $tfliteIntent")
-            return tfliteIntent
-        }
-
         // 1a. Buffer/Identification Regex - Expanded for "sure/show" and common variations
         val regexBuffer = Regex("(show|sure|display|identify|view|find)\\s+(hostiles|friendlies|vehicles|targets|enemies)\\s+(in|within|at)\\s+(\\d+)\\s+(kilometers|km|meters|m)")
         val matchBuffer = regexBuffer.find(lowerInput)
@@ -110,6 +105,11 @@ class SpatialIntelligenceEngine(private val context: Context) {
             if (targetStr.isNotBlank()) {
                 return TacticalIntent(action = actionStr, entity = targetStr, distance = 0, unit = "")
             }
+        }
+
+        classifyWithTflite(voiceInput)?.let { tfliteIntent ->
+            Log.i(tag, "TFLite parsed intent successfully: $tfliteIntent")
+            return tfliteIntent
         }
 
         return null
