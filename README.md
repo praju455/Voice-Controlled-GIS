@@ -86,6 +86,11 @@ Because this application runs entirely offline, it requires pre-compiled geograp
 1. Download an Android-compatible Vosk acoustic model (e.g., `vosk-model-small-en-us`).
 2. Extract the model contents and place them strictly into `/app/src/main/assets/models/model/`.
 
+### 1a. Optional TFLite Intent Model
+1. Export or obtain an `NLClassifier`-compatible TensorFlow Lite text model.
+2. Place it at `/app/src/main/assets/models/nlp_intent.tflite`.
+3. The app will automatically prefer TFLite intent classification when that file is present, and fall back to regex parsing when it is missing.
+
 ### 2. Prepare Map Data (`.mbtiles`)
 1. Use **QGIS** (or alternative geospatial software) to define your tactical operating area. 
 2. Export your map layers (including LULC or satellite imagery) into an MBTiles raster database.

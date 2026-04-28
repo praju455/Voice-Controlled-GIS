@@ -12,23 +12,28 @@ data class TacticalIntent(
     val unit: String
 )
 
-class SpatialIntelligenceEngine(context: Context) {
+class SpatialIntelligenceEngine(private val context: Context) {
     private val tag = "SpatialIntelligence"
     private var nlClassifier: NLClassifier? = null
+    private val classifierAssetPath = "models/nlp_intent.tflite"
+    private val classifierScoreThreshold = 0.55f
 
     init {
-        // Use context to avoid unused parameter warning
         Log.d(tag, "Initializing spatial engine with context: $context")
         initNLClassifier()
     }
 
     private fun initNLClassifier() {
         try {
-            // In a real scenario, "snips_model.tflite" would be present in /assets/
-            // nlClassifier = NLClassifier.createFromFile(context, "snips_model.tflite")
-            Log.i(tag, "TensorFlow Lite Task Library initialized. Awaiting actual .tflite model.")
+            context.assets.open(classifierAssetPath).close()
+            nlClassifier = NLClassifier.createFromFile(context, classifierAssetPath)
+            Log.i(tag, "Loaded TFLite intent classifier from $classifierAssetPath")
         } catch (e: IOException) {
+            Log.i(tag, "No TFLite intent model found at $classifierAssetPath, continuing with regex fallback.")
+            nlClassifier = null
+        } catch (e: Exception) {
             Log.e(tag, "Error initializing TFLite NLClassifier", e)
+            nlClassifier = null
         }
     }
 
@@ -39,6 +44,11 @@ class SpatialIntelligenceEngine(context: Context) {
     fun parseCommand(voiceInput: String): TacticalIntent? {
         val lowerInput = voiceInput.lowercase().trim()
         Log.d(tag, "Parsing voice input: $lowerInput")
+
+        classifyWithTflite(voiceInput)?.let { tfliteIntent ->
+            Log.i(tag, "TFLite parsed intent successfully: $tfliteIntent")
+            return tfliteIntent
+        }
 
         // 1a. Buffer/Identification Regex - Expanded for "sure/show" and common variations
         val regexBuffer = Regex("(show|sure|display|identify|view|find)\\s+(hostiles|friendlies|vehicles|targets|enemies)\\s+(in|within|at)\\s+(\\d+)\\s+(kilometers|km|meters|m)")
@@ -86,19 +96,65 @@ class SpatialIntelligenceEngine(context: Context) {
             }
         }
 
-        // 2. Fallback to Snips TFLite NLClassifier
-        Log.i(tag, "Regex failed, treating with TFLite NLU (Simulated)")
-        nlClassifier?.let {
-            val results = it.classify(voiceInput)
-            // Assuming the top matched category gives us the primary intent 
-            // e.g., SetTacticalPerimeter
-            val topCategory = results.maxByOrNull { category -> category.score }
-            Log.i(tag, "TFLite Classification Top Result: ${topCategory?.label} (Score: ${topCategory?.score})")
-            
-            // Further entity extraction would normally utilize TFLite BertQuestionAnswerer or custom NLP
-        }
-
         return null
+    }
+
+    private fun classifyWithTflite(voiceInput: String): TacticalIntent? {
+        val classifier = nlClassifier ?: return null
+        return try {
+            val results = classifier.classify(voiceInput)
+            val topCategory = results.maxByOrNull { category -> category.score } ?: return null
+            if (topCategory.score < classifierScoreThreshold) {
+                Log.d(tag, "TFLite top score below threshold: ${topCategory.label} -> ${topCategory.score}")
+                return null
+            }
+
+            when (normalizeLabel(topCategory.label)) {
+                "route" -> buildRouteIntent(voiceInput)
+                "clear_route" -> TacticalIntent("clear_route", "route", 0, "")
+                "clear_destination" -> TacticalIntent("clear_destination", "destination", 0, "")
+                "recenter" -> TacticalIntent("recenter", "operator", 0, "")
+                "show_entities" -> buildSpatialIntent(voiceInput)
+                else -> null
+            }
+        } catch (exception: Exception) {
+            Log.e(tag, "TFLite classification failed", exception)
+            null
+        }
+    }
+
+    private fun buildRouteIntent(voiceInput: String): TacticalIntent? {
+        val lowerInput = voiceInput.lowercase().trim()
+        val regexRoute = Regex("^(route|root|path|navigate|go)(?:\\s+me)?(?:\\s+to)?(?:\\s+the)?\\s+(.+)$")
+        val matchRoute = regexRoute.find(lowerInput)
+        return if (matchRoute != null) {
+            val rawAction = matchRoute.groupValues[1]
+            val targetStr = matchRoute.groupValues[2].trim()
+            val actionStr = if (rawAction == "root") "route" else rawAction
+            if (targetStr.isNotBlank()) TacticalIntent(action = actionStr, entity = targetStr, distance = 0, unit = "") else null
+        } else {
+            null
+        }
+    }
+
+    private fun buildSpatialIntent(voiceInput: String): TacticalIntent? {
+        val lowerInput = voiceInput.lowercase().trim()
+        val regexBuffer = Regex("(show|sure|display|identify|view|find)\\s+(hostiles|friendlies|vehicles|targets|enemies)\\s+(in|within|at)\\s+(\\d+)\\s+(kilometers|km|meters|m)")
+        val matchBuffer = regexBuffer.find(lowerInput) ?: return null
+        val (rawAction, entityStr, _, distStr, unitStr) = matchBuffer.destructured
+        val actionStr = if (rawAction == "sure") "show" else rawAction
+        return TacticalIntent(
+            action = actionStr,
+            entity = entityStr,
+            distance = distStr.toIntOrNull() ?: 0,
+            unit = unitStr
+        )
+    }
+
+    private fun normalizeLabel(label: String): String {
+        return label.lowercase()
+            .replace(Regex("[^a-z0-9]+"), "_")
+            .trim('_')
     }
 
     /**
