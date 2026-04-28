@@ -137,7 +137,7 @@ Currently mapped fallback intents include:
 - [ ] Full NLP entity-extraction using a lightweight TFLite model instead of regex
 - [ ] Cross-compile Native SpatiaLite SQLite drivers
 - [ ] Add named destination routing for saved tactical points and offline place lookup
-- [ ] Track remaining distance/ETA and reroute when the operator deviates from the path
+- [x] Track remaining distance/ETA and reroute when the operator deviates from the path
 
 ## 📌 Current Status
 
