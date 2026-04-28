@@ -144,7 +144,7 @@ def build_datasets(
 ) -> tuple[tf.data.Dataset, tf.data.Dataset]:
     train_ds = tf.data.Dataset.from_tensor_slices((train_inputs, train_labels))
     val_ds = tf.data.Dataset.from_tensor_slices((val_inputs, val_labels))
-    train_ds = train_ds.shuffle(len(bundle.train_texts), seed=SEED).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+    train_ds = train_ds.shuffle(len(train_inputs), seed=SEED).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
     val_ds = val_ds.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
     return train_ds, val_ds
 
