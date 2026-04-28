@@ -59,6 +59,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private var activeRouteTotalDistanceMeters: Double = 0.0
     private var activeRouteTotalDurationMillis: Long = 0L
     private var activeRouteDestinationLabel: String? = null
+    private var lastRerouteTimestampMs: Long = 0L
+    private var rerouteInProgress: Boolean = false
 
     private var speechService: SpeechService? = null
     private var model: Model? = null
@@ -70,6 +72,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         drawCurrentLocation(location)
         updateLocationStatus(location)
         updateActiveRouteProgress()
+        maybeRerouteOnDeviation(location)
         if (!hasCenteredOnOperator && isInsideOfflineBounds(location)) {
             mapboxMap?.cameraPosition = CameraPosition.Builder()
                 .target(LatLng(location.latitude, location.longitude))
@@ -88,6 +91,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         private const val DESTINATION_LAYER_ID = "destination-layer"
         private const val ROUTE_SOURCE_ID = "tactical-route-source"
         private const val ROUTE_LAYER_ID = "tactical-route-layer"
+        private const val OFF_ROUTE_THRESHOLD_METERS = 60.0
+        private const val REROUTE_COOLDOWN_MS = 8000L
     }
 
     data class MapPackageInfo(
@@ -737,6 +742,62 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         routeSummaryText.visibility = View.VISIBLE
     }
 
+    private fun maybeRerouteOnDeviation(location: Location) {
+        val routeCoords = activeRouteCoords ?: return
+        if (routeCoords.size < 2 || rerouteInProgress) return
+        if (!isInsideOfflineBounds(location)) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastRerouteTimestampMs < REROUTE_COOLDOWN_MS) return
+
+        val distanceToRoute = distanceToRouteMeters(location, routeCoords)
+        if (distanceToRoute <= OFF_ROUTE_THRESHOLD_METERS) return
+
+        val packageInfo = mapPackageInfo ?: return
+        val destination = currentDestinationForReroute(packageInfo) ?: return
+        rerouteInProgress = true
+        transcriptionText.text = "Off route detected (${distanceToRoute.toInt()} m). Recalculating..."
+
+        try {
+            val routeResult = routingEngine.calculateRoute(
+                location.latitude,
+                location.longitude,
+                destination.latitude,
+                destination.longitude
+            )
+            if (routeResult != null) {
+                drawRouteOnMap(routeResult.coordinates)
+                setActiveRoute(routeResult, destination.label)
+                focusCameraOnRoute(routeResult.coordinates)
+                updateActiveRouteProgress()
+                transcriptionText.text = "Route recalculated. Target: ${destination.label}"
+                lastRerouteTimestampMs = now
+            } else {
+                val routingError = routingEngine.getLastError() ?: "Unknown reroute error"
+                transcriptionText.text = "Reroute failed: $routingError"
+            }
+        } catch (exception: Exception) {
+            Log.e(tag, "Automatic reroute failed", exception)
+            transcriptionText.text = "Reroute error: ${exception.message}"
+        } finally {
+            rerouteInProgress = false
+        }
+    }
+
+    private fun currentDestinationForReroute(packageInfo: MapPackageInfo): ResolvedDestination? {
+        selectedDestination?.let {
+            val label = activeRouteDestinationLabel ?: "selected point"
+            return ResolvedDestination(it.latitude, it.longitude, label)
+        }
+
+        val objectivePoint = buildObjectivePoint(packageInfo)
+        return ResolvedDestination(
+            objectivePoint[0],
+            objectivePoint[1],
+            activeRouteDestinationLabel ?: "objective"
+        )
+    }
+
     private fun findNearestRouteIndex(location: Location, routeCoords: List<DoubleArray>): Int {
         var nearestIndex = 0
         var nearestDistance = Double.MAX_VALUE
@@ -793,6 +854,58 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         val result = FloatArray(1)
         Location.distanceBetween(lat1, lon1, lat2, lon2, result)
         return result[0].toDouble()
+    }
+
+    private fun distanceToRouteMeters(location: Location, routeCoords: List<DoubleArray>): Double {
+        var minDistance = Double.MAX_VALUE
+        for (index in 0 until routeCoords.lastIndex) {
+            val start = routeCoords[index]
+            val end = routeCoords[index + 1]
+            val distance = pointToSegmentDistanceMeters(
+                location.latitude,
+                location.longitude,
+                start[1],
+                start[0],
+                end[1],
+                end[0]
+            )
+            if (distance < minDistance) {
+                minDistance = distance
+            }
+        }
+        return minDistance
+    }
+
+    private fun pointToSegmentDistanceMeters(
+        pointLat: Double,
+        pointLon: Double,
+        startLat: Double,
+        startLon: Double,
+        endLat: Double,
+        endLon: Double
+    ): Double {
+        val refLatRad = Math.toRadians(pointLat)
+        val metersPerDegLat = 111320.0
+        val metersPerDegLon = 111320.0 * kotlin.math.cos(refLatRad)
+
+        val px = pointLon * metersPerDegLon
+        val py = pointLat * metersPerDegLat
+        val sx = startLon * metersPerDegLon
+        val sy = startLat * metersPerDegLat
+        val ex = endLon * metersPerDegLon
+        val ey = endLat * metersPerDegLat
+
+        val dx = ex - sx
+        val dy = ey - sy
+        if (dx == 0.0 && dy == 0.0) {
+            return kotlin.math.hypot(px - sx, py - sy)
+        }
+
+        val t = (((px - sx) * dx) + ((py - sy) * dy)) / ((dx * dx) + (dy * dy))
+        val clampedT = t.coerceIn(0.0, 1.0)
+        val nearestX = sx + clampedT * dx
+        val nearestY = sy + clampedT * dy
+        return kotlin.math.hypot(px - nearestX, py - nearestY)
     }
 
     private fun recenterOnOperator(): Boolean {
