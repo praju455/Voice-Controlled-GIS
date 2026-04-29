@@ -9,7 +9,11 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-class OfflinePlaceIndex(private val context: Context) {
+class OfflinePlaceIndex(
+    private val context: Context,
+    private val placeIndexAssetPath: String = DEFAULT_PLACE_INDEX_ASSET_PATH,
+    private val savedTacticalPointsAssetPath: String = DEFAULT_SAVED_POINTS_ASSET_PATH
+) {
     data class PlaceMatch(
         val name: String,
         val categoryKey: String,
@@ -56,6 +60,11 @@ class OfflinePlaceIndex(private val context: Context) {
     private val loading = AtomicBoolean(false)
     @Volatile
     private var loadError: String? = null
+
+    companion object {
+        const val DEFAULT_PLACE_INDEX_ASSET_PATH = "places/place_index.json"
+        const val DEFAULT_SAVED_POINTS_ASSET_PATH = "places/saved_tactical_points.json"
+    }
 
     fun preloadAsync(onLoaded: (() -> Unit)? = null) {
         if (places != null) {
@@ -246,7 +255,7 @@ class OfflinePlaceIndex(private val context: Context) {
         // over similarly named generic OSM places.
         loadOptionalTacticalPoints(output)
 
-        context.assets.open("places/place_index.json").bufferedReader().use { reader ->
+        context.assets.open(placeIndexAssetPath).bufferedReader().use { reader ->
             JsonReader(reader).use { jsonReader ->
                 appendPlaceArray(output, jsonReader)
             }
@@ -256,7 +265,7 @@ class OfflinePlaceIndex(private val context: Context) {
 
     private fun loadOptionalTacticalPoints(output: MutableList<PlaceRecord>) {
         runCatching {
-            context.assets.open("places/saved_tactical_points.json").bufferedReader().use { reader ->
+            context.assets.open(savedTacticalPointsAssetPath).bufferedReader().use { reader ->
                 JsonReader(reader).use { jsonReader ->
                     appendPlaceArray(output, jsonReader)
                 }

@@ -146,13 +146,50 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         val badgeLabel: String,
         val displayName: String,
         val usesDemoOperator: Boolean,
+        val mbtilesAssetPath: String,
+        val graphhopperZipAssetPath: String,
+        val placeIndexAssetPath: String,
+        val savedTacticalPointsAssetPath: String,
         val startLatFactor: Double,
         val startLonFactor: Double
     )
 
-    private val bengaluruRegion = RegionProfile("bengaluru", "● BENGALURU", "Bengaluru Zone", false, -0.12, -0.12)
-    private val siachenRegion = RegionProfile("siachen", "● SIACHEN BORDER", "Siachen Border", true, -0.18, -0.20)
-    private val locRegion = RegionProfile("loc", "● LINE OF CONTROL", "Line of Control", true, -0.08, -0.22)
+    private val bengaluruRegion = RegionProfile(
+        key = "bengaluru",
+        badgeLabel = "● BENGALURU",
+        displayName = "Bengaluru Zone",
+        usesDemoOperator = false,
+        mbtilesAssetPath = "mbtiles/sample_tactical.mbtiles",
+        graphhopperZipAssetPath = "graphhopper/graphhopper-cache.zip",
+        placeIndexAssetPath = OfflinePlaceIndex.DEFAULT_PLACE_INDEX_ASSET_PATH,
+        savedTacticalPointsAssetPath = OfflinePlaceIndex.DEFAULT_SAVED_POINTS_ASSET_PATH,
+        startLatFactor = -0.12,
+        startLonFactor = -0.12
+    )
+    private val siachenRegion = RegionProfile(
+        key = "siachen",
+        badgeLabel = "● SIACHEN BORDER",
+        displayName = "Siachen Border",
+        usesDemoOperator = true,
+        mbtilesAssetPath = "mbtiles/siachen_border.mbtiles",
+        graphhopperZipAssetPath = "graphhopper/siachen_border-gh.zip",
+        placeIndexAssetPath = "places/siachen_place_index.json",
+        savedTacticalPointsAssetPath = "places/siachen_saved_tactical_points.json",
+        startLatFactor = -0.18,
+        startLonFactor = -0.20
+    )
+    private val locRegion = RegionProfile(
+        key = "loc",
+        badgeLabel = "● LINE OF CONTROL",
+        displayName = "Line of Control",
+        usesDemoOperator = true,
+        mbtilesAssetPath = "mbtiles/line_of_control.mbtiles",
+        graphhopperZipAssetPath = "graphhopper/line_of_control-gh.zip",
+        placeIndexAssetPath = "places/line_of_control_place_index.json",
+        savedTacticalPointsAssetPath = "places/line_of_control_saved_tactical_points.json",
+        startLatFactor = -0.08,
+        startLonFactor = -0.22
+    )
 
     private fun resolveRegion(key: String?): RegionProfile {
         return when (key) {
@@ -161,6 +198,32 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             else -> bengaluruRegion
         }
     }
+
+    private fun regionFallbackAssetPath(region: RegionProfile, assetPath: String): String {
+        if (assetExists(assetPath)) {
+            return assetPath
+        }
+        Log.i(tag, "Asset $assetPath missing for region ${region.key}, falling back to Bengaluru defaults.")
+        return when (assetPath) {
+            region.mbtilesAssetPath -> bengaluruRegion.mbtilesAssetPath
+            region.graphhopperZipAssetPath -> bengaluruRegion.graphhopperZipAssetPath
+            region.placeIndexAssetPath -> bengaluruRegion.placeIndexAssetPath
+            region.savedTacticalPointsAssetPath -> bengaluruRegion.savedTacticalPointsAssetPath
+            else -> assetPath
+        }
+    }
+
+    private fun resolvedMbtilesAssetPath(region: RegionProfile = selectedRegion): String =
+        regionFallbackAssetPath(region, region.mbtilesAssetPath)
+
+    private fun resolvedGraphhopperZipAssetPath(region: RegionProfile = selectedRegion): String =
+        regionFallbackAssetPath(region, region.graphhopperZipAssetPath)
+
+    private fun resolvedPlaceIndexAssetPath(region: RegionProfile = selectedRegion): String =
+        regionFallbackAssetPath(region, region.placeIndexAssetPath)
+
+    private fun resolvedSavedTacticalPointsAssetPath(region: RegionProfile = selectedRegion): String =
+        regionFallbackAssetPath(region, region.savedTacticalPointsAssetPath)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Restore dark/light mode preference before inflation
@@ -211,7 +274,11 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         setupDrawerAndTopBar()
         
         spatialEngine = SpatialIntelligenceEngine(this)
-        placeIndex = OfflinePlaceIndex(this)
+        placeIndex = OfflinePlaceIndex(
+            this,
+            placeIndexAssetPath = resolvedPlaceIndexAssetPath(),
+            savedTacticalPointsAssetPath = resolvedSavedTacticalPointsAssetPath()
+        )
         placeIndex.preloadAsync {
             Handler(Looper.getMainLooper()).post {
                 Log.i(tag, "Offline place index ready.")
@@ -222,7 +289,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         }
         
         unpackGraphHopperAssets()
-        val routingCache = File(cacheDir, "graphhopper-cache").absolutePath
+        val routingCache = File(cacheDir, "graphhopper-cache-${selectedRegion.key}").absolutePath
         routingEngine = TacticalRouterEngine(this, routingCache)
         
         mapView.onCreate(savedInstanceState)
@@ -245,12 +312,12 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             this.mapboxMap = mapboxMap
             statusText.text = "Map Ready, Loading offline style..."
             try {
-                val mbtilesPath = copyAssetToCache("mbtiles/sample_tactical.mbtiles")
+                val mbtilesPath = copyAssetToCache(resolvedMbtilesAssetPath())
                 val packageInfo = inspectMbtilesPackage(mbtilesPath)
                 mapPackageInfo = packageInfo
 
                 if (packageInfo.tileCount <= 0) {
-                    statusText.text = "Offline map package contains 0 tiles. Rebuild sample_tactical.mbtiles."
+                    statusText.text = "Offline map package contains 0 tiles. Rebuild the selected region MBTiles pack."
                     Log.e(tag, "MBTiles package is empty: $mbtilesPath")
                     return@getMapAsync
                 }
@@ -400,30 +467,23 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     private fun applyRegionSelection(region: RegionProfile) {
+        if (selectedRegion.key == region.key) {
+            drawerLayout.closeDrawers()
+            return
+        }
         selectedRegion = region
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             .edit()
             .putString(PREF_KEY_REGION, region.key)
             .apply()
-        topBarRegion.text = region.badgeLabel
-        clearRouteOverlay()
-        clearDestinationSelection()
-        hasCenteredOnOperator = false
-        refreshOperatorPresentation()
-        positionCamera(mapPackageInfo ?: return)
         val message = if (region.usesDemoOperator) {
             getString(R.string.region_demo_mode_message, region.displayName)
         } else {
             getString(R.string.region_live_mode_message, region.displayName)
         }
-        transcriptionText.text = message
-        statusText.text = if (region.usesDemoOperator) {
-            getString(R.string.region_demo_status, region.displayName)
-        } else {
-            getString(R.string.region_live_status, region.displayName)
-        }
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         drawerLayout.closeDrawers()
+        recreate()
     }
 
     private fun refreshOperatorPresentation() {
@@ -1250,7 +1310,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
     
     private fun copyAssetToCache(assetName: String): String {
-        val outFile = File(cacheDir, File(assetName).name)
+        val outFile = File(cacheDir, "${selectedRegion.key}-${File(assetName).name}")
         try {
             assets.open(assetName).use { input ->
                 FileOutputStream(outFile, false).use { output ->
@@ -1265,7 +1325,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     private fun unpackGraphHopperAssets() {
-        val cacheFolder = File(cacheDir, "graphhopper-cache")
+        val cacheFolder = File(cacheDir, "graphhopper-cache-${selectedRegion.key}")
         val markerFile = File(cacheFolder, ".graphhopper-extract-signature")
         val assetSignature = buildGraphhopperAssetSignature()
         val graphFolderIsComplete = hasCompleteGraphCache(cacheFolder)
@@ -1282,7 +1342,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         cacheFolder.mkdirs()
         
         try {
-            assets.open("graphhopper/graphhopper-cache.zip").use { inputStream ->
+            assets.open(resolvedGraphhopperZipAssetPath()).use { inputStream ->
                 ZipInputStream(inputStream).use { zis ->
                     var zipEntry = zis.nextEntry
                     while (zipEntry != null) {
@@ -1321,7 +1381,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     private fun buildGraphhopperAssetSignature(): String {
         val digest = MessageDigest.getInstance("MD5")
-        val totalSize = assets.open("graphhopper/graphhopper-cache.zip").use { input ->
+        val totalSize = assets.open(resolvedGraphhopperZipAssetPath()).use { input ->
             ZipInputStream(input).use { zis ->
                 var sizeAccumulator = 0L
                 var entry: ZipEntry? = zis.nextEntry
@@ -1335,6 +1395,13 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         }
         val digestString = digest.digest(totalSize.toString().toByteArray()).joinToString("") { "%02x".format(it) }
         return "zip_size=$totalSize;digest=$digestString"
+    }
+
+    private fun assetExists(assetPath: String): Boolean {
+        return runCatching {
+            assets.open(assetPath).close()
+            true
+        }.getOrDefault(false)
     }
 
     // --- MapView and App Lifecycle ---
