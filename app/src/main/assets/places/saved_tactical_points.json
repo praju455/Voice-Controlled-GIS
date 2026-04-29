@@ -1,0 +1,47 @@
+[
+  {
+    "name": "base",
+    "normalizedName": "base",
+    "categoryKey": "tactical",
+    "categoryValue": "base",
+    "lat": 13.0476,
+    "lon": 77.5928,
+    "aliases": ["command post", "home base", "command center"]
+  },
+  {
+    "name": "extraction",
+    "normalizedName": "extraction",
+    "categoryKey": "tactical",
+    "categoryValue": "extraction",
+    "lat": 13.0912,
+    "lon": 77.5975,
+    "aliases": ["extract", "evac point", "pickup point"]
+  },
+  {
+    "name": "checkpoint alpha",
+    "normalizedName": "checkpoint alpha",
+    "categoryKey": "tactical",
+    "categoryValue": "checkpoint",
+    "lat": 13.0734,
+    "lon": 77.5632,
+    "aliases": ["alpha checkpoint", "checkpoint a"]
+  },
+  {
+    "name": "safe zone",
+    "normalizedName": "safe zone",
+    "categoryKey": "tactical",
+    "categoryValue": "safe_zone",
+    "lat": 13.0194,
+    "lon": 77.5756,
+    "aliases": ["safe area", "fallback zone"]
+  },
+  {
+    "name": "medical point",
+    "normalizedName": "medical point",
+    "categoryKey": "tactical",
+    "categoryValue": "medical",
+    "lat": 13.0341,
+    "lon": 77.6138,
+    "aliases": ["med point", "aid station", "casualty point"]
+  }
+]

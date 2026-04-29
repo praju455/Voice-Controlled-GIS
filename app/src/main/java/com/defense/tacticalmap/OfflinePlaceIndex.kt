@@ -3,6 +3,7 @@ package com.defense.tacticalmap
 import android.content.Context
 import android.location.Location
 import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -240,21 +241,53 @@ class OfflinePlaceIndex(private val context: Context) {
     }
 
     private fun loadPlaces(): List<PlaceRecord> {
+        val output = ArrayList<PlaceRecord>()
+
+        // Saved tactical points are loaded first so exact voice matches prefer mission-specific names
+        // over similarly named generic OSM places.
+        loadOptionalTacticalPoints(output)
+
         val jsonText = context.assets.open("places/place_index.json").bufferedReader().use { it.readText() }
         val jsonArray = JSONArray(jsonText)
-        val output = ArrayList<PlaceRecord>(jsonArray.length())
+        appendPlaceArray(output, jsonArray)
+        return output
+    }
+
+    private fun loadOptionalTacticalPoints(output: MutableList<PlaceRecord>) {
+        runCatching {
+            context.assets.open("places/saved_tactical_points.json").bufferedReader().use { it.readText() }
+        }.onSuccess { jsonText ->
+            appendPlaceArray(output, JSONArray(jsonText))
+        }
+    }
+
+    private fun appendPlaceArray(output: MutableList<PlaceRecord>, jsonArray: JSONArray) {
         for (index in 0 until jsonArray.length()) {
             val item = jsonArray.getJSONObject(index)
-            output += PlaceRecord(
-                name = item.getString("name"),
-                normalizedName = item.getString("normalizedName"),
-                categoryKey = item.optString("categoryKey"),
-                categoryValue = normalize(item.optString("categoryValue")),
-                lat = item.getDouble("lat"),
-                lon = item.getDouble("lon")
-            )
+            appendPlaceRecord(output, item)
+            val aliases = item.optJSONArray("aliases") ?: continue
+            for (aliasIndex in 0 until aliases.length()) {
+                val alias = aliases.optString(aliasIndex).trim()
+                if (alias.isBlank()) continue
+                output += buildPlaceRecord(item, overrideName = alias)
+            }
         }
-        return output
+    }
+
+    private fun appendPlaceRecord(output: MutableList<PlaceRecord>, item: JSONObject) {
+        output += buildPlaceRecord(item)
+    }
+
+    private fun buildPlaceRecord(item: JSONObject, overrideName: String? = null): PlaceRecord {
+        val name = overrideName ?: item.getString("name")
+        return PlaceRecord(
+            name = item.getString("name"),
+            normalizedName = normalize(overrideName ?: item.optString("normalizedName").ifBlank { name }),
+            categoryKey = item.optString("categoryKey"),
+            categoryValue = normalize(item.optString("categoryValue")),
+            lat = item.getDouble("lat"),
+            lon = item.getDouble("lon")
+        )
     }
 
     private fun normalize(value: String): String {

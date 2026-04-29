@@ -117,7 +117,7 @@ Currently mapped fallback intents include:
 
 | Intent | Voice Command Trigger | Action Performed |
 | :--- | :--- | :--- |
-| **Navigation** | *"Route to base"*, *"Navigate to objective"* | Triggers GraphHopper routing between the operator and the destination, drawing a red LineString overlay on MapLibre. |
+| **Navigation** | *"Route to base"*, *"Navigate to objective"*, *"Route to checkpoint alpha"*, *"Route to Hebbal"*, *"Route to nearest hospital"* | Triggers GraphHopper routing between the operator and the destination, drawing a red LineString overlay on MapLibre. |
 | **Spatial Radius** | *"Show friendlies within 5 km"* | Computes an ST_Buffer ring via SpatiaLite around the designated entity coordinates at the exact range. *(In Progress)* |
 
 --- 
@@ -135,11 +135,11 @@ Currently mapped fallback intents include:
 - [x] Surface route distance and ETA inside the Android UI
 - [x] Add voice controls for route clearing, destination clearing, and recentering
 - [x] Cross-compile Native SpatiaLite SQLite drivers
-- [ ] Add named destination routing for saved tactical points and offline place lookup
+- [x] Add named destination routing for saved tactical points and offline place lookup
 - [x] Track remaining distance/ETA and reroute when the operator deviates from the path
 
 ## 📌 Current Status
 
-The prototype now runs end-to-end on Android with offline map rendering, offline speech recognition, offline routing graph loading, live GPS operator positioning, tap-to-select destinations, on-device route computation, route visualization, and packaged Android SpatiaLite native driver support. The current implementation also surfaces route distance and ETA, and supports voice controls for clearing routes, clearing destinations, and recentering on the operator. The next engineering milestone is strengthening destination-name routing with offline place lookup and then wiring the spatial buffer workflow fully through the integrated SpatiaLite layer.
+The prototype now runs end-to-end on Android with offline map rendering, offline speech recognition, offline routing graph loading, live GPS operator positioning, tap-to-select destinations, saved tactical points, offline place-name lookup, on-device route computation, route visualization, and packaged Android SpatiaLite native driver support. The current implementation also surfaces route distance and ETA, and supports voice controls for clearing routes, clearing destinations, and recentering on the operator. The next engineering focus moves beyond the roadmap into region expansion, UI integration, and fuller spatial buffer visualization through the integrated SpatiaLite layer.
 
 *Maintainer Note: Built as a Hackathon proof-of-concept for offline tactical tracking.*
