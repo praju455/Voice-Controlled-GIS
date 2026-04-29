@@ -37,6 +37,20 @@ class OfflinePlaceIndex(private val context: Context) {
         "university" to listOf("university", "campus", "college")
     )
 
+    private val phraseAliases = mapOf(
+        "hebbal" to listOf("hebble", "hebal", "hebbel", "hebal", "heb ball"),
+        "yelahanka" to listOf("yelahanka", "yelanka", "yelhanka", "yellahanka", "yelahanaka"),
+        "kempegowda international airport" to listOf(
+            "bangalore airport",
+            "bengaluru airport",
+            "international airport",
+            "kempegowda airport",
+            "airport"
+        ),
+        "police" to listOf("police station", "cop station"),
+        "hospital" to listOf("medical", "clinic")
+    )
+
     @Volatile
     private var places: List<PlaceRecord>? = null
     private val loading = AtomicBoolean(false)
@@ -70,7 +84,7 @@ class OfflinePlaceIndex(private val context: Context) {
 
     fun resolve(query: String, currentLocation: Location?): PlaceMatch? {
         val localPlaces = places ?: return null
-        val normalizedQuery = normalize(query)
+        val normalizedQuery = normalizeAndAlias(query)
         if (normalizedQuery.isBlank()) return null
 
         val nearestPhrase = extractNearestCategory(normalizedQuery)
@@ -90,6 +104,9 @@ class OfflinePlaceIndex(private val context: Context) {
 
         val categoryMatch = resolveNearestByCategory(localPlaces, normalizedQuery, currentLocation)
         if (categoryMatch != null) return categoryMatch
+
+        val fuzzyMatch = resolveFuzzyByName(localPlaces, normalizedQuery, currentLocation)
+        if (fuzzyMatch != null) return fuzzyMatch
 
         return null
     }
@@ -125,6 +142,84 @@ class OfflinePlaceIndex(private val context: Context) {
             }
         }
         return direct.map { normalize(it) }.toSet()
+    }
+
+    private fun resolveFuzzyByName(
+        localPlaces: List<PlaceRecord>,
+        normalizedQuery: String,
+        currentLocation: Location?
+    ): PlaceMatch? {
+        val queryTokens = normalizedQuery.split(" ").filter { it.isNotBlank() }
+        if (queryTokens.isEmpty()) return null
+
+        val scored = localPlaces.mapNotNull { place ->
+            val score = fuzzyScore(normalizedQuery, queryTokens, place)
+            if (score == Double.NEGATIVE_INFINITY) null else place to score
+        }
+
+        val bestScore = scored.maxOfOrNull { it.second } ?: return null
+        if (bestScore < 0.55) return null
+
+        val topCandidates = scored
+            .filter { (_, score) -> score >= bestScore - 0.05 }
+            .map { it.first }
+
+        return pickBest(topCandidates, currentLocation)
+    }
+
+    private fun fuzzyScore(query: String, queryTokens: List<String>, place: PlaceRecord): Double {
+        val name = place.normalizedName
+        val nameTokens = name.split(" ").filter { it.isNotBlank() }
+        if (nameTokens.isEmpty()) return Double.NEGATIVE_INFINITY
+
+        val tokenMatches = queryTokens.count { q ->
+            nameTokens.any { n -> n == q || levenshteinDistance(q, n) <= tokenDistanceThreshold(q.length) }
+        }
+        val tokenCoverage = tokenMatches.toDouble() / queryTokens.size.toDouble()
+
+        val wholeNameDistance = levenshteinDistance(query, name)
+        val wholeNameScore = 1.0 - (wholeNameDistance.toDouble() / maxOf(query.length, name.length).toDouble())
+
+        val containsBonus = when {
+            name.contains(query) -> 0.15
+            queryTokens.all { token -> name.contains(token) } -> 0.1
+            else -> 0.0
+        }
+
+        return (tokenCoverage * 0.7) + (wholeNameScore * 0.3) + containsBonus
+    }
+
+    private fun tokenDistanceThreshold(length: Int): Int {
+        return when {
+            length <= 4 -> 1
+            length <= 8 -> 2
+            else -> 3
+        }
+    }
+
+    private fun levenshteinDistance(a: String, b: String): Int {
+        if (a == b) return 0
+        if (a.isEmpty()) return b.length
+        if (b.isEmpty()) return a.length
+
+        val prev = IntArray(b.length + 1) { it }
+        val curr = IntArray(b.length + 1)
+
+        for (i in a.indices) {
+            curr[0] = i + 1
+            for (j in b.indices) {
+                val cost = if (a[i] == b[j]) 0 else 1
+                curr[j + 1] = minOf(
+                    curr[j] + 1,
+                    prev[j + 1] + 1,
+                    prev[j] + cost
+                )
+            }
+            for (j in prev.indices) {
+                prev[j] = curr[j]
+            }
+        }
+        return prev[b.length]
     }
 
     private fun pickBest(candidates: List<PlaceRecord>, currentLocation: Location?): PlaceMatch? {
@@ -167,6 +262,17 @@ class OfflinePlaceIndex(private val context: Context) {
             .replace(Regex("[^a-z0-9 ]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
+    }
+
+    private fun normalizeAndAlias(value: String): String {
+        var normalized = normalize(value)
+        phraseAliases.forEach { (canonical, aliases) ->
+            if (normalized == canonical || aliases.any { alias -> normalized == normalize(alias) }) {
+                normalized = canonical
+                return@forEach
+            }
+        }
+        return normalized
     }
 
     private fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
