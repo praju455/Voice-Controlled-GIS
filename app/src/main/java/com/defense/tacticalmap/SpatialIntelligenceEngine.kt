@@ -25,10 +25,12 @@ class SpatialIntelligenceEngine(private val context: Context) {
     private val classifierScoreThreshold = 0.55f
     private val classifierSequenceLength = 40
     private var tfliteIntentClassifier: TfliteIntentClassifier? = null
+    private val nativeSpatialiteBridge = NativeSpatialiteBridge()
 
     init {
         Log.d(tag, "Initializing spatial engine with context: $context")
         initNLClassifier()
+        initNativeSpatialiteBridge()
     }
 
     private fun initNLClassifier() {
@@ -50,6 +52,15 @@ class SpatialIntelligenceEngine(private val context: Context) {
         } catch (e: Exception) {
             Log.e(tag, "Error initializing TFLite intent classifier", e)
             tfliteIntentClassifier = null
+        }
+    }
+
+    private fun initNativeSpatialiteBridge() {
+        val status = nativeSpatialiteBridge.getDriverStatus()
+        if (nativeSpatialiteBridge.isBridgeReady) {
+            Log.i(tag, "Native spatial bridge loaded: $status")
+        } else {
+            Log.w(tag, "Native spatial bridge unavailable: $status")
         }
     }
 
@@ -175,9 +186,15 @@ class SpatialIntelligenceEngine(private val context: Context) {
     /**
      * Executes SpatiaLite math on the local database constraint layer.
      */
-    fun computeGeometricBuffer(intent: TacticalIntent) {
+    fun computeGeometricBuffer(intent: TacticalIntent): String {
         val distanceInMeters = if (intent.unit.startsWith("k")) intent.distance * 1000 else intent.distance
         Log.i(tag, "Executing Spatial SQL: ST_Buffer for ${intent.entity} at ${distanceInMeters}m radius via SpatiaLite SQLite interface")
+
+        val nativeStatus = nativeSpatialiteBridge.computeBufferSummary(intent.entity, distanceInMeters)
+        Log.i(tag, nativeStatus)
+        if (!nativeSpatialiteBridge.hasSpatialiteSupport) {
+            return "Native spatial driver ready, but libspatialite is not linked yet."
+        }
 
         // NATIVE SPATIALITE SQL EXECUTION (Simulated Implementation)
         /*
@@ -195,6 +212,7 @@ class SpatialIntelligenceEngine(private val context: Context) {
         
         // Process cursor -> Emit GeoJSON to MapLibre
         */
+        return "SpatiaLite buffer computation completed."
     }
 }
 

@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.defense.tacticalmap"
     compileSdk = 34
+    ndkVersion = "30.0.14904198"
 
     defaultConfig {
         applicationId = "com.defense.tacticalmap"
@@ -17,6 +18,12 @@ android {
         ndk {
             abiFilters.add("arm64-v8a")
             abiFilters.add("x86_64")
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+            }
         }
     }
 
@@ -48,6 +55,13 @@ android {
     
     aaptOptions {
         noCompress("tflite", "mbtiles")
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "4.1.2"
+        }
     }
 }
 
