@@ -134,13 +134,12 @@ Currently mapped fallback intents include:
 - [x] Add tap-to-select destination routing on the offline map
 - [x] Surface route distance and ETA inside the Android UI
 - [x] Add voice controls for route clearing, destination clearing, and recentering
-- [ ] Full NLP entity-extraction using a lightweight TFLite model instead of regex
 - [ ] Cross-compile Native SpatiaLite SQLite drivers
 - [ ] Add named destination routing for saved tactical points and offline place lookup
 - [x] Track remaining distance/ETA and reroute when the operator deviates from the path
 
 ## 📌 Current Status
 
-The prototype now runs end-to-end on Android with offline map rendering, offline speech recognition, offline routing graph loading, live GPS operator positioning, tap-to-select destinations, on-device route computation, and route visualization working on-device. The current implementation also surfaces route distance and ETA, and supports voice controls for clearing routes, clearing destinations, and recentering on the operator. The next engineering milestone is destination-name routing using saved tactical points and offline place lookup.
+The prototype now runs end-to-end on Android with offline map rendering, offline speech recognition, offline routing graph loading, live GPS operator positioning, tap-to-select destinations, on-device route computation, and route visualization working on-device. The current implementation also surfaces route distance and ETA, and supports voice controls for clearing routes, clearing destinations, and recentering on the operator. The next engineering milestones are strengthening destination-name routing with offline place lookup and expanding the spatial analysis layer with native SpatiaLite support.
 
 *Maintainer Note: Built as a Hackathon proof-of-concept for offline tactical tracking.*
