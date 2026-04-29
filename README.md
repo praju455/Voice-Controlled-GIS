@@ -114,6 +114,41 @@ Once a destination is resolved:
 - GraphHopper computes the route on-device
 - MapLibre renders the route as an overlay on the offline map
 
+### 🏛️ System Architecture Diagram
+
+```mermaid
+graph TD
+    Operator((Operator Voice)) -->|Microphone Audio| Vosk[Vosk Offline Speech Engine]
+
+    subgraph Android_Application["Android Application"]
+        Vosk -->|Recognized Text| SpatialEngine[SpatialIntelligenceEngine]
+        SpatialEngine -->|Route Intent via Regex| DestinationResolver[Offline Destination Resolver]
+        SpatialEngine -->|Spatial Intent| SpatialiteBridge[Native SpatiaLite Bridge]
+
+        DestinationResolver -->|Saved Tactical Points| TacticalPoints[(saved_tactical_points.json)]
+        DestinationResolver -->|40k+ Offline Place Index| PlaceIndex[(place_index.json)]
+
+        DestinationResolver -->|Resolved Destination| Router[TacticalRouterEngine]
+        Router -->|Route Request| GraphHopper[(GraphHopper .gh Cache)]
+        Router -->|Route Coordinates| MapLibre[MapLibre Native]
+
+        GPS[Android GPS / LocationManager] -->|Operator Position| Router
+        GPS -->|Operator Marker| MapLibre
+        MBTiles[(MBTiles Raster Map)] -->|Local Tiles| MapLibre
+        SpatialiteBridge -->|Future Spatial SQL Results| MapLibre
+    end
+
+    MapLibre -->|Rendered Map + Overlays| Display((Device Screen))
+
+    classDef hardware fill:#2B3A42,stroke:#3F5D7D,stroke-width:2px,color:#fff;
+    classDef software fill:#3F5D7D,stroke:#6699CC,stroke-width:2px,color:#fff;
+    classDef database fill:#1A252C,stroke:#00A86B,stroke-width:2px,color:#fff;
+
+    class Operator,Display,GPS hardware;
+    class Vosk,SpatialEngine,DestinationResolver,Router,MapLibre,SpatialiteBridge software;
+    class TacticalPoints,PlaceIndex,GraphHopper,MBTiles database;
+```
+
 ---
 
 ## 🗺 Map and Data Pipeline
