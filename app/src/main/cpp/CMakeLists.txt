@@ -15,5 +15,6 @@ find_library(
 
 target_link_libraries(
     tacticalmap_native
+    dl
     ${log-lib}
 )
