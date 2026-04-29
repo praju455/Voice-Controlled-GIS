@@ -3,6 +3,7 @@ package com.defense.tacticalmap
 import android.Manifest
 import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
+import android.graphics.drawable.AnimationDrawable
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -11,10 +12,16 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.View
+import android.widget.ImageButton
+import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.cardview.widget.CardView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import android.graphics.Color
 import com.mapbox.mapboxsdk.Mapbox
 import com.mapbox.mapboxsdk.camera.CameraPosition
@@ -46,9 +53,31 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     private lateinit var mapView: MapView
     private var mapboxMap: MapboxMap? = null
+
+    // ── Legacy hidden views (kept for code compatibility) ──
     private lateinit var statusText: TextView
     private lateinit var routeSummaryText: TextView
+
+    // ── New UI components ──
     private lateinit var transcriptionText: TextView
+    private lateinit var drawerLayout: DrawerLayout
+    private lateinit var routeSummaryCard: CardView
+    private lateinit var routeDestinationText: TextView
+    private lateinit var routeRemainingText: TextView
+    private lateinit var routeEtaText: TextView
+    private lateinit var routeTotalText: TextView
+    private lateinit var routeProgressBar: ProgressBar
+    private lateinit var routeStatusChip: TextView
+    private lateinit var destinationPanel: CardView
+    private lateinit var destPanelName: TextView
+    private lateinit var destPanelCoords: TextView
+    private lateinit var destPanelDistance: TextView
+    private lateinit var topBarRegion: TextView
+    private lateinit var micIndicatorDot: View
+    private lateinit var micStatusLabel: TextView
+    private var micPulseAnim: AnimationDrawable? = null
+    private var isDarkMode = true
+
     private val tag = "OfflineTacticalMap"
     private var mapPackageInfo: MapPackageInfo? = null
     private lateinit var locationManager: LocationManager
@@ -109,17 +138,50 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Restore dark/light mode preference before inflation
+        val prefs = getSharedPreferences("veer_rakshak_prefs", MODE_PRIVATE)
+        isDarkMode = prefs.getBoolean("dark_mode", true)
+        val desiredNightMode = if (isDarkMode) {
+            AppCompatDelegate.MODE_NIGHT_YES
+        } else {
+            AppCompatDelegate.MODE_NIGHT_NO
+        }
+        if (AppCompatDelegate.getDefaultNightMode() != desiredNightMode) {
+            AppCompatDelegate.setDefaultNightMode(desiredNightMode)
+        }
+
         super.onCreate(savedInstanceState)
-        
+
         // Initialize MapLibre (legacy Mapbox class) before setting content view
         Mapbox.getInstance(this)
         setContentView(R.layout.activity_main)
 
+        // ── Legacy views (kept for compat, visibility=gone) ──
         mapView = findViewById(R.id.mapView)
         statusText = findViewById(R.id.statusText)
         routeSummaryText = findViewById(R.id.routeSummaryText)
-        transcriptionText = findViewById(R.id.transcriptionText)
+
+        // ── New UI views ──
+        transcriptionText  = findViewById(R.id.transcriptionText)
+        drawerLayout       = findViewById(R.id.drawerLayout)
+        routeSummaryCard   = findViewById(R.id.routeSummaryCard)
+        routeDestinationText = findViewById(R.id.routeDestinationText)
+        routeRemainingText = findViewById(R.id.routeRemainingText)
+        routeEtaText       = findViewById(R.id.routeEtaText)
+        routeTotalText     = findViewById(R.id.routeTotalText)
+        routeProgressBar   = findViewById(R.id.routeProgressBar)
+        routeStatusChip    = findViewById(R.id.routeStatusChip)
+        destinationPanel   = findViewById(R.id.destinationPanel)
+        destPanelName      = findViewById(R.id.destPanelName)
+        destPanelCoords    = findViewById(R.id.destPanelCoords)
+        destPanelDistance  = findViewById(R.id.destPanelDistance)
+        topBarRegion       = findViewById(R.id.topBarRegion)
+        micIndicatorDot    = findViewById(R.id.micIndicatorDot)
+        micStatusLabel     = findViewById(R.id.micStatusLabel)
+
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+
+        setupDrawerAndTopBar()
         
         spatialEngine = SpatialIntelligenceEngine(this)
         placeIndex = OfflinePlaceIndex(this)
@@ -184,6 +246,148 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         }
     }
 
+    // ── Drawer, top bar, and sidebar wiring ──────────────────────────────────
+
+    private fun setupDrawerAndTopBar() {
+        // Hamburger opens drawer
+        findViewById<ImageButton>(R.id.btnMenu).setOnClickListener {
+            drawerLayout.openDrawer(androidx.core.view.GravityCompat.START)
+        }
+
+        // Dark mode toggle (top bar icon)
+        findViewById<ImageButton>(R.id.btnDarkModeToggle).setOnClickListener {
+            isDarkMode = !isDarkMode
+            getSharedPreferences("veer_rakshak_prefs", MODE_PRIVATE)
+                .edit().putBoolean("dark_mode", isDarkMode).apply()
+            applyThemeMode(isDarkMode)
+            // Recreate to apply theme change
+            recreate()
+        }
+
+        // Sidebar dark mode switch (mirrors top bar toggle)
+        val switchDark = findViewById<androidx.appcompat.widget.SwitchCompat?>(R.id.switchDarkMode)
+        switchDark?.isChecked = isDarkMode
+        switchDark?.setOnCheckedChangeListener { _, checked ->
+            isDarkMode = checked
+            getSharedPreferences("veer_rakshak_prefs", MODE_PRIVATE)
+                .edit().putBoolean("dark_mode", isDarkMode).apply()
+            applyThemeMode(isDarkMode)
+            drawerLayout.closeDrawers()
+            recreate()
+        }
+
+        // Region items
+        findViewById<View?>(R.id.regionBengaluru)?.setOnClickListener {
+            topBarRegion.text = "● BENGALURU"
+            drawerLayout.closeDrawers()
+        }
+        findViewById<View?>(R.id.regionSiachen)?.setOnClickListener {
+            Toast.makeText(this, getString(R.string.region_not_loaded), Toast.LENGTH_SHORT).show()
+        }
+        findViewById<View?>(R.id.regionLoC)?.setOnClickListener {
+            Toast.makeText(this, getString(R.string.region_not_loaded), Toast.LENGTH_SHORT).show()
+        }
+
+        // Sidebar map control buttons
+        findViewById<View?>(R.id.btnDrawerRecenter)?.setOnClickListener {
+            if (recenterOnOperator()) {
+                transcriptionText.text = "Recentering on operator position."
+            } else {
+                transcriptionText.text = "Cannot recenter: waiting for GPS fix inside the offline zone."
+            }
+            drawerLayout.closeDrawers()
+        }
+        findViewById<View?>(R.id.btnDrawerClearRoute)?.setOnClickListener {
+            clearRouteOverlay()
+            transcriptionText.text = "Route cleared."
+            drawerLayout.closeDrawers()
+        }
+        findViewById<View?>(R.id.btnDrawerClearDestination)?.setOnClickListener {
+            clearDestinationSelection()
+            transcriptionText.text = "Destination cleared."
+            drawerLayout.closeDrawers()
+        }
+
+        // Route card close button
+        findViewById<ImageButton?>(R.id.btnCloseRouteCard)?.setOnClickListener {
+            clearRouteOverlay()
+        }
+
+        // Destination panel close
+        findViewById<ImageButton?>(R.id.btnCloseDestPanel)?.setOnClickListener {
+            hideDestinationPanel()
+        }
+
+        // Destination panel Route Here button
+        findViewById<View?>(R.id.btnRouteHere)?.setOnClickListener {
+            hideDestinationPanel()
+            // Guard: ensure a destination has been selected before routing
+            selectedDestination ?: return@setOnClickListener
+            transcriptionText.text = "INTENT: Route to selected point\n\nCalculating Offline Path..."
+            val routeRequestResult = buildRouteRequest("objective")
+            if (routeRequestResult == null) {
+                transcriptionText.text = "Routing blocked: waiting for offline map package."
+                return@setOnClickListener
+            }
+            if (routeRequestResult.errorMessage != null) {
+                transcriptionText.text = routeRequestResult.errorMessage
+                return@setOnClickListener
+            }
+            val coords = routeRequestResult.coordinates ?: run {
+                transcriptionText.text = "Routing blocked: operator GPS unavailable."
+                return@setOnClickListener
+            }
+            try {
+                val routeResult = routingEngine.calculateRoute(coords[0], coords[1], coords[2], coords[3])
+                if (routeResult != null) {
+                    transcriptionText.text = "Route calculated! Target: ${routeRequestResult.destinationLabel}"
+                    drawRouteOnMap(routeResult.coordinates)
+                    setActiveRoute(routeResult, routeRequestResult.destinationLabel)
+                    focusCameraOnRoute(routeResult.coordinates)
+                    updateActiveRouteProgress()
+                } else {
+                    transcriptionText.text = "Route calculation failed: ${routingEngine.getLastError()}"
+                    clearRouteSummary()
+                }
+            } catch (e: Exception) {
+                transcriptionText.text = "Routing Error: ${e.message}"
+                clearRouteSummary()
+            }
+        }
+
+        // Clear destination button in panel
+        findViewById<View?>(R.id.btnClearDest)?.setOnClickListener {
+            clearDestinationSelection()
+            hideDestinationPanel()
+            transcriptionText.text = "Destination cleared."
+        }
+    }
+
+    private fun applyThemeMode(dark: Boolean) {
+        AppCompatDelegate.setDefaultNightMode(
+            if (dark) AppCompatDelegate.MODE_NIGHT_YES
+            else AppCompatDelegate.MODE_NIGHT_NO
+        )
+    }
+
+    private fun showDestinationPanel(point: LatLng, label: String) {
+        destPanelName.text = label
+        destPanelCoords.text = "%.5f°N  %.5f°E".format(point.latitude, point.longitude)
+        val dist = currentLocation?.let {
+            val result = FloatArray(1)
+            Location.distanceBetween(it.latitude, it.longitude, point.latitude, point.longitude, result)
+            formatDistance(result[0].toDouble())
+        } ?: "—"
+        destPanelDistance.text = dist
+        destinationPanel.visibility = View.VISIBLE
+    }
+
+    private fun hideDestinationPanel() {
+        destinationPanel.visibility = View.GONE
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
     private fun initModel() {
         transcriptionText.text = "Unpacking Offline Acoustic Model..."
         StorageService.unpack(this, "models/model", "model",
@@ -203,8 +407,13 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             val rec = Recognizer(model, 16000.0f)
             speechService = SpeechService(rec, 16000.0f)
             speechService?.startListening(this)
+            // Start mic pulse animation
+            micPulseAnim = micIndicatorDot.background as? AnimationDrawable
+            micPulseAnim?.start()
+            micStatusLabel.text = "LIVE"
         } catch (e: Exception) {
             Log.e(tag, "Exception starting speech service", e)
+            micStatusLabel.text = "ERR"
         }
     }
 
@@ -338,7 +547,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 style.addSource(GeoJsonSource(ROUTE_SOURCE_ID, featureCollection))
                 style.addLayer(LineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID).withProperties(
                     PropertyFactory.lineWidth(5f),
-                    PropertyFactory.lineColor(Color.RED)
+                    PropertyFactory.lineColor("#F3C969") // Tactical amber — better contrast on dark map
                 ))
             }
         }
@@ -591,10 +800,10 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             transcriptionText.text = "Selected point is outside the offline mission zone."
             return
         }
-        clearRouteOverlay()
         selectedDestination = point
         drawDestinationMarker(point)
         transcriptionText.text = "Destination selected. Say \"route to objective\" to navigate."
+        showDestinationPanel(point, "Selected Point")
     }
 
     private fun clearRouteOverlay() {
@@ -695,10 +904,17 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     private fun updateRouteSummary(routeResult: TacticalRouterEngine.RouteResult, destinationLabel: String) {
-        val distanceText = formatDistance(routeResult.distanceMeters)
-        val etaText = formatDuration(routeResult.durationMillis)
-        routeSummaryText.text = "Destination: $destinationLabel\nDistance: $distanceText\nETA: $etaText"
-        routeSummaryText.visibility = View.VISIBLE
+        // Update new route card
+        routeDestinationText.text = destinationLabel
+        routeTotalText.text = formatDistance(routeResult.distanceMeters)
+        routeEtaText.text = formatDuration(routeResult.durationMillis)
+        routeRemainingText.text = formatDistance(routeResult.distanceMeters)
+        routeProgressBar.progress = 0
+        routeStatusChip.text = getString(R.string.route_status_on)
+        routeStatusChip.setTextColor(ContextCompat.getColor(this, R.color.status_on_route))
+        routeSummaryCard.visibility = View.VISIBLE
+        // Also hide destination panel when route is active
+        hideDestinationPanel()
     }
 
     private fun setActiveRoute(routeResult: TacticalRouterEngine.RouteResult, destinationLabel: String) {
@@ -728,18 +944,16 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             1.0
         }
         val remainingDurationMillis = (activeRouteTotalDurationMillis * remainingRatio).toLong()
-        val totalDistanceText = formatDistance(activeRouteTotalDistanceMeters)
-        val remainingDistanceText = formatDistance(remainingDistanceMeters)
-        val etaText = formatDuration(remainingDurationMillis)
+        val progressPct = ((1.0 - remainingRatio) * 100).toInt()
         val destinationLabel = activeRouteDestinationLabel ?: "objective"
 
-        routeSummaryText.text = buildString {
-            append("Destination: ").append(destinationLabel)
-            append("\nRemaining: ").append(remainingDistanceText)
-            append("\nETA: ").append(etaText)
-            append("\nTotal Route: ").append(totalDistanceText)
-        }
-        routeSummaryText.visibility = View.VISIBLE
+        // Update new route card UI
+        routeDestinationText.text = destinationLabel
+        routeRemainingText.text = formatDistance(remainingDistanceMeters)
+        routeEtaText.text = formatDuration(remainingDurationMillis)
+        routeTotalText.text = formatDistance(activeRouteTotalDistanceMeters)
+        routeProgressBar.progress = progressPct
+        routeSummaryCard.visibility = View.VISIBLE
     }
 
     private fun maybeRerouteOnDeviation(location: Location) {
@@ -751,7 +965,19 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         if (now - lastRerouteTimestampMs < REROUTE_COOLDOWN_MS) return
 
         val distanceToRoute = distanceToRouteMeters(location, routeCoords)
-        if (distanceToRoute <= OFF_ROUTE_THRESHOLD_METERS) return
+        if (distanceToRoute <= OFF_ROUTE_THRESHOLD_METERS) {
+            // Update status chip to ON ROUTE if it was previously off
+            if (::routeStatusChip.isInitialized) {
+                routeStatusChip.text = getString(R.string.route_status_on)
+                routeStatusChip.setTextColor(ContextCompat.getColor(this, R.color.status_on_route))
+            }
+            return
+        }
+        // Show off-route status
+        if (::routeStatusChip.isInitialized) {
+            routeStatusChip.text = getString(R.string.route_status_rerouting)
+            routeStatusChip.setTextColor(ContextCompat.getColor(this, R.color.status_rerouting))
+        }
 
         val packageInfo = mapPackageInfo ?: return
         val destination = currentDestinationForReroute(packageInfo) ?: return
@@ -829,6 +1055,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private fun clearRouteSummary() {
         routeSummaryText.visibility = View.GONE
         routeSummaryText.text = ""
+        if (::routeSummaryCard.isInitialized) {
+            routeSummaryCard.visibility = View.GONE
+        }
     }
 
     private fun formatDistance(distanceMeters: Double): String {

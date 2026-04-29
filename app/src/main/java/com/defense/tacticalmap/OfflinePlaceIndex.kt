@@ -2,8 +2,7 @@ package com.defense.tacticalmap
 
 import android.content.Context
 import android.location.Location
-import org.json.JSONArray
-import org.json.JSONObject
+import android.util.JsonReader
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -247,46 +246,104 @@ class OfflinePlaceIndex(private val context: Context) {
         // over similarly named generic OSM places.
         loadOptionalTacticalPoints(output)
 
-        val jsonText = context.assets.open("places/place_index.json").bufferedReader().use { it.readText() }
-        val jsonArray = JSONArray(jsonText)
-        appendPlaceArray(output, jsonArray)
+        context.assets.open("places/place_index.json").bufferedReader().use { reader ->
+            JsonReader(reader).use { jsonReader ->
+                appendPlaceArray(output, jsonReader)
+            }
+        }
         return output
     }
 
     private fun loadOptionalTacticalPoints(output: MutableList<PlaceRecord>) {
         runCatching {
-            context.assets.open("places/saved_tactical_points.json").bufferedReader().use { it.readText() }
-        }.onSuccess { jsonText ->
-            appendPlaceArray(output, JSONArray(jsonText))
+            context.assets.open("places/saved_tactical_points.json").bufferedReader().use { reader ->
+                JsonReader(reader).use { jsonReader ->
+                    appendPlaceArray(output, jsonReader)
+                }
+            }
+        }.onSuccess {
+            // tactical points loaded successfully
         }
     }
 
-    private fun appendPlaceArray(output: MutableList<PlaceRecord>, jsonArray: JSONArray) {
-        for (index in 0 until jsonArray.length()) {
-            val item = jsonArray.getJSONObject(index)
-            appendPlaceRecord(output, item)
-            val aliases = item.optJSONArray("aliases") ?: continue
-            for (aliasIndex in 0 until aliases.length()) {
-                val alias = aliases.optString(aliasIndex).trim()
-                if (alias.isBlank()) continue
-                output += buildPlaceRecord(item, overrideName = alias)
+    private fun appendPlaceArray(output: MutableList<PlaceRecord>, jsonReader: JsonReader) {
+        jsonReader.beginArray()
+        while (jsonReader.hasNext()) {
+            appendPlaceRecord(output, jsonReader)
+        }
+        jsonReader.endArray()
+    }
+
+    private fun appendPlaceRecord(output: MutableList<PlaceRecord>, jsonReader: JsonReader) {
+        val place = readPlaceDefinition(jsonReader)
+        output += buildPlaceRecord(place)
+        place.aliases.forEach { alias ->
+            if (alias.isNotBlank()) {
+                output += buildPlaceRecord(place, overrideName = alias)
             }
         }
     }
 
-    private fun appendPlaceRecord(output: MutableList<PlaceRecord>, item: JSONObject) {
-        output += buildPlaceRecord(item)
+    private data class PlaceDefinition(
+        val name: String,
+        val normalizedName: String,
+        val categoryKey: String,
+        val categoryValue: String,
+        val lat: Double,
+        val lon: Double,
+        val aliases: List<String>
+    )
+
+    private fun readPlaceDefinition(jsonReader: JsonReader): PlaceDefinition {
+        var name = ""
+        var normalizedName = ""
+        var categoryKey = ""
+        var categoryValue = ""
+        var lat = 0.0
+        var lon = 0.0
+        val aliases = mutableListOf<String>()
+
+        jsonReader.beginObject()
+        while (jsonReader.hasNext()) {
+            when (jsonReader.nextName()) {
+                "name" -> name = jsonReader.nextString()
+                "normalizedName" -> normalizedName = jsonReader.nextString()
+                "categoryKey" -> categoryKey = jsonReader.nextString()
+                "categoryValue" -> categoryValue = jsonReader.nextString()
+                "lat" -> lat = jsonReader.nextDouble()
+                "lon" -> lon = jsonReader.nextDouble()
+                "aliases" -> {
+                    jsonReader.beginArray()
+                    while (jsonReader.hasNext()) {
+                        aliases += jsonReader.nextString()
+                    }
+                    jsonReader.endArray()
+                }
+                else -> jsonReader.skipValue()
+            }
+        }
+        jsonReader.endObject()
+
+        return PlaceDefinition(
+            name = name,
+            normalizedName = normalizedName,
+            categoryKey = categoryKey,
+            categoryValue = categoryValue,
+            lat = lat,
+            lon = lon,
+            aliases = aliases
+        )
     }
 
-    private fun buildPlaceRecord(item: JSONObject, overrideName: String? = null): PlaceRecord {
-        val name = overrideName ?: item.getString("name")
+    private fun buildPlaceRecord(place: PlaceDefinition, overrideName: String? = null): PlaceRecord {
+        val name = overrideName ?: place.name
         return PlaceRecord(
-            name = item.getString("name"),
-            normalizedName = normalize(overrideName ?: item.optString("normalizedName").ifBlank { name }),
-            categoryKey = item.optString("categoryKey"),
-            categoryValue = normalize(item.optString("categoryValue")),
-            lat = item.getDouble("lat"),
-            lon = item.getDouble("lon")
+            name = place.name,
+            normalizedName = normalize(overrideName ?: place.normalizedName.ifBlank { name }),
+            categoryKey = place.categoryKey,
+            categoryValue = normalize(place.categoryValue),
+            lat = place.lat,
+            lon = place.lon
         )
     }
 
