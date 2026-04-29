@@ -66,6 +66,17 @@ class OfflinePlaceIndex(
         const val DEFAULT_SAVED_POINTS_ASSET_PATH = "places/saved_tactical_points.json"
     }
 
+    data class BoundsFilter(
+        val west: Double,
+        val south: Double,
+        val east: Double,
+        val north: Double
+    ) {
+        fun contains(lat: Double, lon: Double): Boolean {
+            return lon in west..east && lat in south..north
+        }
+    }
+
     fun preloadAsync(onLoaded: (() -> Unit)? = null) {
         if (places != null) {
             onLoaded?.invoke()
@@ -91,30 +102,34 @@ class OfflinePlaceIndex(
 
     fun getLoadError(): String? = loadError
 
-    fun resolve(query: String, currentLocation: Location?): PlaceMatch? {
+    fun resolve(query: String, currentLocation: Location?, boundsFilter: BoundsFilter? = null): PlaceMatch? {
         val localPlaces = places ?: return null
         val normalizedQuery = normalizeAndAlias(query)
         if (normalizedQuery.isBlank()) return null
+        val candidatePlaces = boundsFilter?.let { bounds ->
+            localPlaces.filter { bounds.contains(it.lat, it.lon) }
+        } ?: localPlaces
+        if (candidatePlaces.isEmpty()) return null
 
         val nearestPhrase = extractNearestCategory(normalizedQuery)
         if (nearestPhrase != null) {
-            val nearest = resolveNearestByCategory(localPlaces, nearestPhrase, currentLocation)
+            val nearest = resolveNearestByCategory(candidatePlaces, nearestPhrase, currentLocation)
             if (nearest != null) return nearest
         }
 
-        val exactName = localPlaces.filter { it.normalizedName == normalizedQuery }
+        val exactName = candidatePlaces.filter { it.normalizedName == normalizedQuery }
         pickBest(exactName, currentLocation)?.let { return it }
 
-        val prefixName = localPlaces.filter { it.normalizedName.startsWith(normalizedQuery) }
+        val prefixName = candidatePlaces.filter { it.normalizedName.startsWith(normalizedQuery) }
         pickBest(prefixName, currentLocation)?.let { return it }
 
-        val containsName = localPlaces.filter { it.normalizedName.contains(normalizedQuery) }
+        val containsName = candidatePlaces.filter { it.normalizedName.contains(normalizedQuery) }
         pickBest(containsName, currentLocation)?.let { return it }
 
-        val categoryMatch = resolveNearestByCategory(localPlaces, normalizedQuery, currentLocation)
+        val categoryMatch = resolveNearestByCategory(candidatePlaces, normalizedQuery, currentLocation)
         if (categoryMatch != null) return categoryMatch
 
-        val fuzzyMatch = resolveFuzzyByName(localPlaces, normalizedQuery, currentLocation)
+        val fuzzyMatch = resolveFuzzyByName(candidatePlaces, normalizedQuery, currentLocation)
         if (fuzzyMatch != null) return fuzzyMatch
 
         return null

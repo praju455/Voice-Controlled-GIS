@@ -119,9 +119,19 @@ class TacticalRouterEngine(context: Context, private val graphCacheDir: String) 
 
     /**
      * Calculates the fastest route entirely offline using Contraction Hierarchies.
+     * If [hazardManager] is provided and contains active zones, those areas are
+     * injected as blocked polygons into GraphHopper's CustomModel — the engine
+     * will automatically find the best path that avoids all hazard zones.
+     *
      * Returns a GeoJSON-compatible LineString coordinate set.
      */
-    fun calculateRoute(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double): RouteResult? {
+    fun calculateRoute(
+        fromLat: Double,
+        fromLon: Double,
+        toLat: Double,
+        toLon: Double,
+        hazardManager: HazardZoneManager? = null
+    ): RouteResult? {
         val currentHopper = hopper
         if (currentHopper == null) {
             lastError = lastError ?: "GraphHopper not initialized or failed to load"
@@ -134,6 +144,20 @@ class TacticalRouterEngine(context: Context, private val graphCacheDir: String) 
                 .setProfile("car")
                 .setLocale(Locale.US)
             req.putHint("ch.disable", true)
+
+            // ── Inject hazard zones as blocked areas ──────────────────────────
+            if (hazardManager != null && hazardManager.hasZones()) {
+                try {
+                    val customModelJson = hazardManager.buildCustomModelJson()
+                    req.putHint("custom_model", customModelJson)
+                    Log.i(tag, "Applied ${hazardManager.zones.size} hazard zone(s) to routing request")
+                } catch (e: Exception) {
+                    // Non-fatal: log and continue with normal routing
+                    Log.w(tag, "Could not apply hazard zones, routing without avoidance: ${e.message}")
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────
+
             val rsp = currentHopper.route(req)
 
             if (rsp.hasErrors()) {
@@ -148,7 +172,7 @@ class TacticalRouterEngine(context: Context, private val graphCacheDir: String) 
                 for (i in 0 until pointList.size()) {
                     coordinateList.add(doubleArrayOf(pointList.getLon(i), pointList.getLat(i)))
                 }
-                
+
                 lastError = null
                 Log.i(tag, "Calculated route successfully with distance: ${path.distance}m")
                 return RouteResult(

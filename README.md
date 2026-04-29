@@ -2,7 +2,7 @@
 
 An Android tactical mapping prototype that runs fully offline on-device. The app combines local map rendering, offline speech recognition, offline route computation, offline destination lookup, and native spatial-analysis plumbing without requiring cloud APIs or internet connectivity.
 
-The current build is no longer just a map demo. It now supports live GPS-based routing, tap-to-select destinations, saved tactical points, offline place-name routing, route progress tracking, automatic rerouting, and a tactical Android UI layer built around the map.
+The current build is no longer just a map demo. It now supports multi-region offline map packs, live GPS-based routing, tap-to-select destinations, saved tactical points, offline place-name routing, hazard-aware rerouting, team mesh sync, and a tactical Android UI layer built around the map.
 
 ---
 
@@ -11,11 +11,19 @@ The current build is no longer just a map demo. It now supports live GPS-based r
 - **100% offline operation:** no cloud dependency for maps, routing, or speech commands.
 - **Offline speech control:** Vosk listens on-device and sends recognized text into a deterministic command parser.
 - **Offline tactical map rendering:** MapLibre renders local raster MBTiles without network access.
-- **Live GPS routing:** routes now start from the operator’s real phone location instead of demo seed coordinates.
-- **Tap-to-route flow:** the operator can tap a destination on the map and then say `route to objective`.
+- **Multi-region asset packs:** Bengaluru, Siachen Border, and Line of Control can each load their own offline map and route graph bundles.
+- **Live GPS routing:** Bengaluru routes start from the operator’s real phone location instead of demo seed coordinates.
+- **Demo-region routing:** Siachen and Line of Control can use fixed in-region operator seed points so remote operational zones can still be demonstrated from anywhere.
+- **Tap-to-route flow:** the operator can tap a destination on the map and then either tap `GET DIRECTIONS` or say `route to objective`.
 - **Offline named destination routing:** the app can route to saved tactical points and offline indexed places by spoken name.
+- **Forgiving offline destination phrases:** short commands such as `bank`, `hospital`, and known place names can be resolved through the offline place index without needing a full `route to ...` phrase every time.
 - **Distance and ETA display:** the active route summary card shows total distance, remaining distance, and ETA.
 - **Automatic rerouting:** if the operator deviates from the active route, the app recomputes a new route.
+- **Hazard-aware routing:** tactical hazard zones can be marked and active routes are recalculated to avoid blocked areas when alternate graph paths exist.
+- **Hazard persistence and sync:** hazard zones persist locally and can be mirrored across nearby teammates on the same local Wi-Fi / hotspot mesh.
+- **Team mesh overlays:** teammate locations, stale/offline state, callsigns, and hazard broadcasts can be shared without internet.
+- **Shake zoom shortcut:** a deliberate double-shake gesture can alternate zoom in / zoom out without removing normal finger pinch controls.
+- **Refined tactical HUD:** the app now uses a more professional olive/amber defense theme, compact command cards, a structured top bar, branded drawer header, and a launcher icon tuned for better visibility on Android home screens.
 - **Native spatial-analysis driver integration:** Android SpatiaLite native drivers are now packaged into the app and exposed through JNI for future spatial SQL workflows.
 
 ---
@@ -27,7 +35,7 @@ Every major component was selected to work offline on Android.
 ### Android App Layer
 - **Kotlin:** primary app logic, activity lifecycle, UI control, GPS handling, command parsing, and routing orchestration.
 - **XML layouts:** Android UI structure for the tactical HUD, drawer, route summary card, destination panel, and splash screen.
-- **Android SDK APIs:** permissions, location services, audio capture lifecycle, file extraction, caching, and local storage.
+- **Android SDK APIs:** permissions, location services, audio capture lifecycle, sensors, file extraction, caching, and local storage.
 
 ### Map Rendering
 - **MapLibre Native (Android):** renders the local map and all route/marker overlays.
@@ -46,7 +54,13 @@ Every major component was selected to work offline on Android.
 ### Offline Destination Lookup
 - **`place_index.json`:** the app’s offline searchable place database generated from map data. This contains roughly **40,000+ indexed places**.
 - **`saved_tactical_points.json`:** mission-specific named points such as `base`, `extraction`, `checkpoint alpha`, `safe zone`, and `medical point`.
+- **Region tactical point packs:** region-specific saved points such as `siachen_saved_tactical_points.json` and `line_of_control_saved_tactical_points.json`.
 - **Fuzzy and alias matching:** the lookup layer can recover from common local-name variations and category-style phrases like `nearest hospital`.
+
+### Hazard and Team Sync
+- **HazardZoneManager:** local circle-based tactical no-go zones with map overlay rendering and GraphHopper blocked-area export.
+- **UDP local mesh service:** peer position + hazard sync on the same hotspot/Wi-Fi network without internet.
+- **Team state manager:** teammate freshness tracking, stale-member aging, and sidebar/team-overlay rendering.
 
 ### Native Spatial Analysis
 - **Android SpatiaLite package:** packaged native spatial SQLite wrapper for Android.
@@ -157,7 +171,7 @@ The app has two different offline geospatial layers:
 
 ### Visual Map Layer
 - source data prepared externally
-- exported into `sample_tactical.mbtiles`
+- exported into region-specific MBTiles packages
 - copied locally at runtime
 - inspected and unpacked into raster tiles
 - rendered by MapLibre
@@ -165,7 +179,7 @@ The app has two different offline geospatial layers:
 ### Routing Graph Layer
 - OpenStreetMap road data is processed with GraphHopper on desktop
 - GraphHopper produces a `.gh` route graph cache
-- the cache is zipped into `graphhopper-cache.zip`
+- the cache is zipped into region-specific graph bundles
 - the app unpacks it on first run
 - GraphHopper routes against this local graph
 
@@ -182,16 +196,18 @@ The Android UI has been expanded well beyond the original simple overlay.
 
 ### Top Bar
 - hamburger menu button
-- app title
-- active region badge
-- dark mode toggle
+- integrated emblem + title stack
+- mission subtitle
+- active region badge with compact chip styling
+- dedicated operator recenter control
 
 ### Left Navigation Drawer
 - region shortcuts
 - tactical controls
 - map recenter action
-- clear route / clear destination actions
-- UI placeholders for future region switching
+- clear route / clear destination / clear hazards actions
+- team mesh status and callsign controls
+- region switching for Bengaluru, Siachen Border, and Line of Control
 
 ### Route Summary Card
 - destination label
@@ -205,7 +221,7 @@ The Android UI has been expanded well beyond the original simple overlay.
 - selected destination name
 - destination coordinates
 - distance from current operator position
-- route-to-here action
+- `GET DIRECTIONS` action
 - clear destination action
 
 ### Operator Feedback HUD
@@ -218,6 +234,21 @@ The Android UI has been expanded well beyond the original simple overlay.
 - operator location marker
 - destination marker
 - route polyline
+- hazard polygons
+- teammate markers and callsign labels
+
+### Utility Controls
+- floating rotating compass button that visually tracks map bearing and snaps back to north on tap
+- hazard placement FAB
+- splash screen / launcher branding
+- app launcher icon based on the Veer Rakshak emblem
+
+### UI Design Direction
+- dark olive and muted amber military palette instead of generic dark-mode tones
+- compact HUD cards with rounded corners and thin tactical outlines
+- branded drawer header with tighter spacing and emblem-first hierarchy
+- curved / semicircle control plates for the emblem and compass controls
+- reduced visual duplication between the floating compass and top-bar recenter action
 
 ---
 
@@ -235,6 +266,11 @@ The app currently supports all of the following:
 - recenter on operator by voice
 - show remaining distance and ETA
 - reroute automatically on deviation
+- place hazard zones by voice or by map interaction
+- clear hazards by voice or UI
+- share hazards across nearby teammates on local mesh
+- show teammate live / stale status on the map and in the drawer
+- use deliberate shake gestures for alternating zoom in / zoom out
 
 Examples:
 - `route to objective`
@@ -246,6 +282,12 @@ Examples:
 - `clear route`
 - `clear destination`
 - `recenter on me`
+- `hostile area here`
+- `flood zone here`
+- `blast radius here`
+- `blocked road here`
+- `restricted zone here`
+- `clear hazards`
 
 ---
 
@@ -281,14 +323,18 @@ Place the extracted Vosk model contents in:
 - `app/src/main/assets/models/model/`
 
 ### 2. Offline Map Package
-Place the raster map package in:
+Place the raster map package(s) in:
 
-- `app/src/main/assets/mbtiles/sample_tactical.mbtiles`
+- `app/src/main/assets/mbtiles/bengaluru_full.mbtiles`
+- `app/src/main/assets/mbtiles/siachen_border.mbtiles`
+- `app/src/main/assets/mbtiles/line_of_control.mbtiles`
 
 ### 3. GraphHopper Cache
-Place the zipped GraphHopper route cache in:
+Place the zipped GraphHopper route cache(s) in:
 
-- `app/src/main/assets/graphhopper/graphhopper-cache.zip`
+- `app/src/main/assets/graphhopper/bengaluru_full-gh.zip`
+- `app/src/main/assets/graphhopper/siachen_border-gh.zip`
+- `app/src/main/assets/graphhopper/line_of_control-gh.zip`
 
 ### 4. Optional Intent Model
 If you want to experiment with TFLite classification, place:
@@ -335,15 +381,17 @@ The roadmap implementation is complete. The project now runs as an advanced offl
 - regex-first command parsing
 - offline destination-name routing
 - live GPS routing
+- region-specific offline asset packs
 - route progress/ETA tracking
 - automatic rerouting
+- hazard-aware route avoidance
+- local team mesh sync
 - packaged native SpatiaLite driver support
 - expanded tactical UI controls
 
 The next engineering phase moves beyond the roadmap into:
-- region switching and regional asset integration
-- expanding Bengaluru coverage
-- adding `Siachen Border` and `Line of Control` operational regions
+- refining full Bengaluru performance and coverage
+- deeper region-specific place packs for Siachen and Line of Control
 - deeper tactical spatial overlays and analysis visualization
 
 *Maintainer Note: Built as a hackathon proof-of-concept for secure offline tactical mapping and navigation.*

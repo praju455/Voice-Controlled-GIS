@@ -24,6 +24,19 @@ class SpatialIntelligenceEngine(private val context: Context) {
     private val classifierVocabAssetPath = "models/nlp_intent_vocab.json"
     private val classifierScoreThreshold = 0.55f
     private val classifierSequenceLength = 40
+    private val implicitDestinationStopPhrases = setOf(
+        "hello",
+        "hi",
+        "hey",
+        "yes",
+        "no",
+        "okay",
+        "ok",
+        "thanks",
+        "thank you",
+        "test",
+        "testing"
+    )
     private var tfliteIntentClassifier: TfliteIntentClassifier? = null
     private val nativeSpatialiteBridge = NativeSpatialiteBridge()
 
@@ -106,6 +119,51 @@ class SpatialIntelligenceEngine(private val context: Context) {
             return TacticalIntent(action = "recenter", entity = "operator", distance = 0, unit = "")
         }
 
+        // 1c. Hazard Zone Commands ────────────────────────────────────────────
+
+        // "clear hazards" / "remove all hazards" / "clear danger zones"
+        val regexClearHazards = Regex("(clear|remove|delete|reset)\\s+(all\\s+)?(hazards?|danger\\s+zones?|no.go\\s+zones?)")
+        if (regexClearHazards.containsMatchIn(lowerInput)) {
+            return TacticalIntent(action = "clear_hazards", entity = "hazards", distance = 0, unit = "")
+        }
+
+        // "mark hazard here" / "hazard zone here" / "mark danger here"
+        val regexMarkHazard = Regex("(mark|add|place|set)\\s+(a\\s+)?(hazard|danger|threat)(?:\\s+zone)?(?:\\s+here)?")
+        if (regexMarkHazard.containsMatchIn(lowerInput)) {
+            return TacticalIntent(action = "mark_hazard", entity = "HOSTILE_AREA", distance = 200, unit = "m")
+        }
+
+        // "hostile area here" / "hostile zone" / "enemy zone"
+        val regexHostile = Regex("(hostile|enemy|threat|hostile\\s+area|hostile\\s+zone|enemy\\s+territory)(?:\\s+here)?")
+        if (regexHostile.containsMatchIn(lowerInput)) {
+            return TacticalIntent(action = "mark_hazard", entity = "HOSTILE_AREA", distance = 200, unit = "m")
+        }
+
+        // "flood zone here" / "flooded area"
+        val regexFlood = Regex("(flood|flooded|waterlogged|inundated)(?:\\s+zone|\\s+area)?(?:\\s+here)?")
+        if (regexFlood.containsMatchIn(lowerInput)) {
+            return TacticalIntent(action = "mark_hazard", entity = "FLOOD_ZONE", distance = 200, unit = "m")
+        }
+
+        // "blast radius here" / "explosion area" / "IED zone"
+        val regexBlast = Regex("(blast|explosion|ied|bomb|detonation|blast\\s+radius)(?:\\s+zone|\\s+area)?(?:\\s+here)?")
+        if (regexBlast.containsMatchIn(lowerInput)) {
+            return TacticalIntent(action = "mark_hazard", entity = "BLAST_RADIUS", distance = 200, unit = "m")
+        }
+
+        // "blocked road" / "road blocked" / "road closed"
+        val regexBlocked = Regex("(blocked?|closed|impassable)\\s+(road|route|path|street)|(road|route|path)\\s+(blocked?|closed|impassable)")
+        if (regexBlocked.containsMatchIn(lowerInput)) {
+            return TacticalIntent(action = "mark_hazard", entity = "BLOCKED_ROAD", distance = 100, unit = "m")
+        }
+
+        // "restricted zone" / "no-go zone" / "restricted area"
+        val regexRestricted = Regex("(restricted|no.go|exclusion|forbidden)(?:\\s+zone|\\s+area)?(?:\\s+here)?")
+        if (regexRestricted.containsMatchIn(lowerInput)) {
+            return TacticalIntent(action = "mark_hazard", entity = "RESTRICTED", distance = 300, unit = "m")
+        }
+
+
         // 1b. Routing Regex - Capture the entire requested destination phrase for offline lookup.
         val regexRoute = Regex("^(route|root|path|navigate|go)(?:\\s+me)?(?:\\s+to)?(?:\\s+the)?\\s+(.+)$")
         val matchRoute = regexRoute.find(lowerInput)
@@ -123,7 +181,52 @@ class SpatialIntelligenceEngine(private val context: Context) {
             return tfliteIntent
         }
 
+        if (isImplicitDestinationPhrase(lowerInput)) {
+            val implicitIntent = TacticalIntent(
+                action = "route",
+                entity = lowerInput,
+                distance = 0,
+                unit = ""
+            )
+            Log.i(tag, "Implicit destination parsed successfully: $implicitIntent")
+            return implicitIntent
+        }
+
         return null
+    }
+
+    private fun isImplicitDestinationPhrase(input: String): Boolean {
+        if (input.isBlank()) return false
+        if (input in implicitDestinationStopPhrases) return false
+        if (input.any { it.isDigit() }) return false
+
+        val tokens = input.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (tokens.isEmpty() || tokens.size > 4) return false
+
+        val looksLikeNaturalPhrase = input.matches(Regex("[a-z][a-z\\s.-]{1,48}"))
+        if (!looksLikeNaturalPhrase) return false
+
+        val blockedLeadWords = setOf(
+            "show",
+            "display",
+            "identify",
+            "view",
+            "find",
+            "clear",
+            "remove",
+            "delete",
+            "reset",
+            "mark",
+            "add",
+            "place",
+            "set",
+            "recenter",
+            "centre",
+            "center"
+        )
+        if (tokens.first() in blockedLeadWords) return false
+
+        return true
     }
 
     private fun classifyWithTflite(voiceInput: String): TacticalIntent? {

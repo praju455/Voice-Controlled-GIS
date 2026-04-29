@@ -1,0 +1,5 @@
+clear_destination
+clear_route
+recenter
+route
+show_entities

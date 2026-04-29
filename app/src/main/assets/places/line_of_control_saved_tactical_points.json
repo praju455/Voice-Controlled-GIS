@@ -1,0 +1,123 @@
+[
+  {
+    "name": "base",
+    "normalizedName": "base",
+    "categoryKey": "tactical",
+    "categoryValue": "base",
+    "lat": 34.5539,
+    "lon": 76.1349,
+    "aliases": [
+      "loc base",
+      "command post",
+      "kargil base",
+      "main base"
+    ]
+  },
+  {
+    "name": "medical point",
+    "normalizedName": "medical point",
+    "categoryKey": "tactical",
+    "categoryValue": "medical",
+    "lat": 34.5572,
+    "lon": 76.1268,
+    "aliases": [
+      "med point",
+      "aid station",
+      "field hospital",
+      "medical camp"
+    ]
+  },
+  {
+    "name": "extraction",
+    "normalizedName": "extraction",
+    "categoryKey": "tactical",
+    "categoryValue": "extraction",
+    "lat": 34.5598,
+    "lon": 76.1315,
+    "aliases": [
+      "extract",
+      "pickup point",
+      "helipad",
+      "evac point"
+    ]
+  },
+  {
+    "name": "checkpoint alpha",
+    "normalizedName": "checkpoint alpha",
+    "categoryKey": "tactical",
+    "categoryValue": "checkpoint",
+    "lat": 34.4306,
+    "lon": 75.7574,
+    "aliases": [
+      "alpha checkpoint",
+      "checkpoint a",
+      "drass checkpoint",
+      "forward checkpoint"
+    ]
+  },
+  {
+    "name": "safe zone",
+    "normalizedName": "safe zone",
+    "categoryKey": "tactical",
+    "categoryValue": "safe_zone",
+    "lat": 34.2661,
+    "lon": 75.9497,
+    "aliases": [
+      "safe area",
+      "fallback zone",
+      "sankoo safe zone"
+    ]
+  },
+  {
+    "name": "drass post",
+    "normalizedName": "drass post",
+    "categoryKey": "tactical",
+    "categoryValue": "forward_post",
+    "lat": 34.4306,
+    "lon": 75.7574,
+    "aliases": [
+      "drass",
+      "drass sector",
+      "sector drass"
+    ]
+  },
+  {
+    "name": "batalik post",
+    "normalizedName": "batalik post",
+    "categoryKey": "tactical",
+    "categoryValue": "forward_post",
+    "lat": 34.6768,
+    "lon": 76.4734,
+    "aliases": [
+      "batalik",
+      "batalik sector",
+      "forward post batalik"
+    ]
+  },
+  {
+    "name": "tololing observation",
+    "normalizedName": "tololing observation",
+    "categoryKey": "tactical",
+    "categoryValue": "observation",
+    "lat": 34.4683,
+    "lon": 75.7345,
+    "aliases": [
+      "tololing",
+      "observation post",
+      "tololing post"
+    ]
+  },
+  {
+    "name": "tiger hill observation",
+    "normalizedName": "tiger hill observation",
+    "categoryKey": "tactical",
+    "categoryValue": "observation",
+    "lat": 34.5208,
+    "lon": 75.7532,
+    "aliases": [
+      "tiger hill",
+      "tiger hill post",
+      "ridge observation"
+    ]
+  }
+]

@@ -7,9 +7,14 @@ import android.graphics.drawable.AnimationDrawable
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.View
 import android.widget.ImageButton
@@ -23,6 +28,11 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.drawerlayout.widget.DrawerLayout
 import android.graphics.Color
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import com.mapbox.mapboxsdk.Mapbox
 import com.mapbox.mapboxsdk.camera.CameraPosition
 import com.mapbox.mapboxsdk.maps.MapboxMap
@@ -30,6 +40,7 @@ import com.mapbox.mapboxsdk.maps.MapView
 import com.mapbox.mapboxsdk.maps.Style
 import com.mapbox.mapboxsdk.geometry.LatLng
 import com.mapbox.mapboxsdk.style.layers.CircleLayer
+import com.mapbox.mapboxsdk.style.layers.FillLayer
 import com.mapbox.mapboxsdk.style.layers.LineLayer
 import com.mapbox.mapboxsdk.style.layers.PropertyFactory
 import com.mapbox.mapboxsdk.style.sources.GeoJsonSource
@@ -46,10 +57,12 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.security.MessageDigest
+import kotlin.concurrent.thread
+import kotlin.math.sqrt
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
-class MainActivity : AppCompatActivity(), RecognitionListener {
+class MainActivity : AppCompatActivity(), RecognitionListener, SensorEventListener {
 
     private lateinit var mapView: MapView
     private var mapboxMap: MapboxMap? = null
@@ -61,6 +74,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     // ── New UI components ──
     private lateinit var transcriptionText: TextView
     private lateinit var drawerLayout: DrawerLayout
+    private lateinit var launchOverlay: View
     private lateinit var routeSummaryCard: CardView
     private lateinit var routeDestinationText: TextView
     private lateinit var routeRemainingText: TextView
@@ -73,10 +87,62 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private lateinit var destPanelCoords: TextView
     private lateinit var destPanelDistance: TextView
     private lateinit var topBarRegion: TextView
+    private lateinit var compassFloatingButton: ImageButton
     private lateinit var micIndicatorDot: View
     private lateinit var micStatusLabel: TextView
     private var micPulseAnim: AnimationDrawable? = null
     private var isDarkMode = true
+    private lateinit var hazardManager: HazardZoneManager
+    private var isHazardDrawMode = false
+
+    // MapLibre layer IDs for hazard overlays
+    // ── Team Mesh ─────────────────────────────────────────────────────
+    private lateinit var teamLocationManager: TeamLocationManager
+    private var myDeviceId: String = ""
+    private var myCallsign: String = "ALPHA-1"
+    private val TEAM_SOURCE_ID = "team-positions-source"
+    private val TEAM_LAYER_ID  = "team-positions-layer"
+    private val TEAM_LABEL_LAYER_ID = "team-labels-layer"
+    private lateinit var lbm: LocalBroadcastManager
+    private val meshReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            intent ?: return
+            when (intent.action) {
+                TeamMeshService.ACTION_PEER_POSITION -> {
+                    val id       = intent.getStringExtra(TeamMeshService.EXTRA_MEMBER_ID) ?: return
+                    val callsign = intent.getStringExtra(TeamMeshService.EXTRA_CALLSIGN) ?: "UNKNOWN"
+                    val lat      = intent.getDoubleExtra(TeamMeshService.EXTRA_LAT, 0.0)
+                    val lon      = intent.getDoubleExtra(TeamMeshService.EXTRA_LON, 0.0)
+                    val accuracy = intent.getFloatExtra(TeamMeshService.EXTRA_ACCURACY, 0f)
+                    teamLocationManager.updateMember(id, callsign, lat, lon, accuracy)
+                }
+                TeamMeshService.ACTION_HAZARD_ADD -> {
+                    val zoneJson = intent.getStringExtra(TeamMeshService.EXTRA_ZONE_JSON) ?: return
+                    applyRemoteHazardAdd(zoneJson)
+                }
+                TeamMeshService.ACTION_HAZARD_CLEAR -> {
+                    val zoneId = intent.getStringExtra(TeamMeshService.EXTRA_ZONE_ID) ?: return
+                    hazardManager.removeZone(zoneId)
+                    updateHazardZoneOverlay()
+                    transcriptionText.text = "⚠️ Peer cleared hazard zone."
+                    rerouteActiveRoute("Peer cleared a hazard. Refreshing route.")
+                }
+                TeamMeshService.ACTION_HAZARD_CLEAR_ALL -> {
+                    hazardManager.clearAll()
+                    updateHazardZoneOverlay()
+                    transcriptionText.text = "⚠️ Peer cleared ALL hazard zones."
+                    rerouteActiveRoute("Peer cleared hazards. Refreshing route.")
+                }
+                TeamMeshService.ACTION_STATE_REQUEST -> {
+                    // A new peer joined — send them our full hazard state
+                    broadcastHazardStateDump()
+                }
+            }
+        }
+    }
+    private val HAZARD_SOURCE_ID = "hazard-zones-source"
+    private val HAZARD_FILL_LAYER_ID = "hazard-zones-fill"
+    private val HAZARD_STROKE_LAYER_ID = "hazard-zones-stroke"
     private lateinit var selectedRegion: RegionProfile
 
     private val tag = "OfflineTacticalMap"
@@ -91,17 +157,36 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private var activeRouteDestinationLabel: String? = null
     private var lastRerouteTimestampMs: Long = 0L
     private var rerouteInProgress: Boolean = false
+    private var smoothedSpeedMetersPerSecond: Double? = null
+    private var lastEtaSampleLocation: Location? = null
+    private lateinit var sensorManager: SensorManager
+    private var accelerometer: Sensor? = null
+    private var shakeImpulseCount: Int = 0
+    private var lastShakeImpulseTimestampMs: Long = 0L
+    private var lastShakeZoomTriggerTimestampMs: Long = 0L
+    private var nextShakeZoomsIn: Boolean = true
 
     private var speechService: SpeechService? = null
     private var model: Model? = null
     private lateinit var spatialEngine: SpatialIntelligenceEngine
     private lateinit var routingEngine: TacticalRouterEngine
     private lateinit var placeIndex: OfflinePlaceIndex
+    private var launchStartedAtMs: Long = 0L
+    private var launchOverlayDismissed: Boolean = false
+    private var audioPermissionGranted: Boolean = false
+    private var mapInitializationComplete: Boolean = false
+    private var voiceModelInitializationStarted: Boolean = false
+    @Volatile private var routingEngineReady: Boolean = false
     private val locationListener = LocationListener { location ->
+        updateObservedSpeed(location)
         currentLocation = location
         refreshOperatorPresentation()
         updateActiveRouteProgress()
         maybeRerouteOnDeviation(location)
+        // Broadcast our position to the team mesh
+        if (::teamLocationManager.isInitialized) {
+            updateMeshServicePosition(location.latitude, location.longitude, location.accuracy)
+        }
         if (!hasCenteredOnOperator && effectiveOperatorLocation()?.let { isInsideOfflineBounds(it) } == true) {
             val operatorLocation = effectiveOperatorLocation() ?: return@LocationListener
             mapboxMap?.cameraPosition = CameraPosition.Builder()
@@ -126,6 +211,10 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         private const val ROUTE_LAYER_ID = "tactical-route-layer"
         private const val OFF_ROUTE_THRESHOLD_METERS = 60.0
         private const val REROUTE_COOLDOWN_MS = 8000L
+        private const val SHAKE_ACCEL_THRESHOLD = 15.0
+        private const val SHAKE_IMPULSE_WINDOW_MS = 1200L
+        private const val SHAKE_ZOOM_COOLDOWN_MS = 2500L
+        private const val SHAKE_ZOOM_DELTA = 1.15
     }
 
     data class MapPackageInfo(
@@ -146,6 +235,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         val badgeLabel: String,
         val displayName: String,
         val usesDemoOperator: Boolean,
+        val demoOperatorLat: Double? = null,
+        val demoOperatorLon: Double? = null,
         val mbtilesAssetPath: String,
         val graphhopperZipAssetPath: String,
         val placeIndexAssetPath: String,
@@ -159,6 +250,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         badgeLabel = "● BENGALURU",
         displayName = "Bengaluru Zone",
         usesDemoOperator = false,
+        demoOperatorLat = null,
+        demoOperatorLon = null,
         mbtilesAssetPath = "mbtiles/sample_tactical.mbtiles",
         graphhopperZipAssetPath = "graphhopper/graphhopper-cache.zip",
         placeIndexAssetPath = OfflinePlaceIndex.DEFAULT_PLACE_INDEX_ASSET_PATH,
@@ -171,6 +264,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         badgeLabel = "● SIACHEN BORDER",
         displayName = "Siachen Border",
         usesDemoOperator = true,
+        demoOperatorLat = 35.1943,
+        demoOperatorLon = 77.2131,
         mbtilesAssetPath = "mbtiles/siachen_border.mbtiles",
         graphhopperZipAssetPath = "graphhopper/siachen_border-gh.zip",
         placeIndexAssetPath = "places/siachen_place_index.json",
@@ -183,6 +278,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         badgeLabel = "● LINE OF CONTROL",
         displayName = "Line of Control",
         usesDemoOperator = true,
+        demoOperatorLat = 34.4306,
+        demoOperatorLon = 75.7574,
         mbtilesAssetPath = "mbtiles/line_of_control.mbtiles",
         graphhopperZipAssetPath = "graphhopper/line_of_control-gh.zip",
         placeIndexAssetPath = "places/line_of_control_place_index.json",
@@ -253,6 +350,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         // ── New UI views ──
         transcriptionText  = findViewById(R.id.transcriptionText)
         drawerLayout       = findViewById(R.id.drawerLayout)
+        launchOverlay      = findViewById(R.id.launchOverlay)
         routeSummaryCard   = findViewById(R.id.routeSummaryCard)
         routeDestinationText = findViewById(R.id.routeDestinationText)
         routeRemainingText = findViewById(R.id.routeRemainingText)
@@ -265,13 +363,20 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         destPanelCoords    = findViewById(R.id.destPanelCoords)
         destPanelDistance  = findViewById(R.id.destPanelDistance)
         topBarRegion       = findViewById(R.id.topBarRegion)
+        compassFloatingButton = findViewById(R.id.btnCompassFloating)
         micIndicatorDot    = findViewById(R.id.micIndicatorDot)
         micStatusLabel     = findViewById(R.id.micStatusLabel)
+        launchStartedAtMs = SystemClock.elapsedRealtime()
         topBarRegion.text = selectedRegion.badgeLabel
 
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
         setupDrawerAndTopBar()
+        hazardManager = HazardZoneManager(this)
+        setupHazardFab()
+        setupTeamMesh()
         
         spatialEngine = SpatialIntelligenceEngine(this)
         placeIndex = OfflinePlaceIndex(
@@ -288,13 +393,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             }
         }
         
-        unpackGraphHopperAssets()
-        val routingCache = File(cacheDir, "graphhopper-cache-${selectedRegion.key}").absolutePath
-        routingEngine = TacticalRouterEngine(this, routingCache)
-        
         mapView.onCreate(savedInstanceState)
-        
-        // Setup Map
+
+        initializeRoutingEngineAsync()
         initializeMap()
         ensureLocationAccess()
 
@@ -303,45 +404,426 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         if (permissionCheck != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), PERMISSIONS_REQUEST_RECORD_AUDIO)
         } else {
-            initModel()
+            audioPermissionGranted = true
+            maybeStartVoiceModel()
         }
     }
 
     private fun initializeMap() {
         mapView.getMapAsync { mapboxMap ->
             this.mapboxMap = mapboxMap
-            statusText.text = "Map Ready, Loading offline style..."
-            try {
-                val mbtilesPath = copyAssetToCache(resolvedMbtilesAssetPath())
-                val packageInfo = inspectMbtilesPackage(mbtilesPath)
-                mapPackageInfo = packageInfo
+            statusText.text = "Preparing offline map..."
+            thread(name = "offline-map-init-${selectedRegion.key}") {
+                try {
+                    val mbtilesPath = copyAssetToCache(resolvedMbtilesAssetPath())
+                    val packageInfo = inspectMbtilesPackage(mbtilesPath)
 
-                if (packageInfo.tileCount <= 0) {
-                    statusText.text = "Offline map package contains 0 tiles. Rebuild the selected region MBTiles pack."
-                    Log.e(tag, "MBTiles package is empty: $mbtilesPath")
-                    return@getMapAsync
-                }
-
-                val tilesRoot = extractMbtilesToRasterTiles(mbtilesPath)
-                val stylePath = prepareStyleJson(tilesRoot, packageInfo)
-
-                mapboxMap.setStyle(Style.Builder().fromUri("file://$stylePath")) { _ ->
-                    statusText.text = "Offline Tactical Map Active"
-                    positionCamera(packageInfo)
-                    refreshOperatorPresentation()
-                    selectedDestination?.let { drawDestinationMarker(it) }
-                    mapboxMap.addOnMapClickListener { point ->
-                        handleDestinationSelection(point)
-                        true
+                    if (packageInfo.tileCount <= 0) {
+                        Log.e(tag, "MBTiles package is empty: $mbtilesPath")
+                        runOnUiThread {
+                            if (!isDestroyed && !isFinishing) {
+                                statusText.text = "Offline map package contains 0 tiles. Rebuild the selected region MBTiles pack."
+                            }
+                        }
+                        return@thread
                     }
-                    Log.i(tag, "Map loaded offline successfully.")
+
+                    val tilesRoot = extractMbtilesToRasterTiles(mbtilesPath, packageInfo)
+                    val stylePath = prepareStyleJson(tilesRoot, packageInfo)
+
+                    runOnUiThread {
+                        if (isDestroyed || isFinishing) return@runOnUiThread
+                        mapPackageInfo = packageInfo
+                        mapboxMap.setStyle(Style.Builder().fromUri("file://$stylePath")) { _ ->
+                            mapInitializationComplete = true
+                            statusText.text = "Offline Tactical Map Active"
+                            mapboxMap.addOnCameraMoveListener { syncCompassBearing() }
+                            positionCamera(packageInfo)
+                            syncCompassBearing()
+                            refreshOperatorPresentation()
+                            selectedDestination?.let { drawDestinationMarker(it) }
+                            mapboxMap.addOnMapClickListener { point ->
+                                if (isHazardDrawMode) {
+                                    showHazardTypePickerDialog(point)
+                                } else {
+                                    handleDestinationSelection(point)
+                                }
+                                true
+                            }
+                            mapboxMap.addOnMapLongClickListener { point ->
+                                showHazardTypePickerDialog(point)
+                                true
+                            }
+                            if (hazardManager.hasZones()) updateHazardZoneOverlay()
+                            dismissLaunchOverlayIfReady()
+                            maybeStartVoiceModel()
+                            Log.i(tag, "Map loaded offline successfully.")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(tag, "Failed to load map style", e)
+                    runOnUiThread {
+                        if (!isDestroyed && !isFinishing) {
+                            statusText.text = "Error loading offline map: ${e.message}"
+                        }
+                    }
                 }
-            } catch (e: Exception) {
-                statusText.text = "Error loading offline map: ${e.message}"
-                Log.e(tag, "Failed to load map style", e)
             }
         }
     }
+
+    private fun initializeRoutingEngineAsync() {
+        routingEngineReady = false
+        statusText.text = "Preparing offline routing..."
+        val routingCache = File(cacheDir, "graphhopper-cache-${selectedRegion.key}").absolutePath
+        thread(name = "offline-routing-init-${selectedRegion.key}") {
+            try {
+                unpackGraphHopperAssets()
+                val engine = TacticalRouterEngine(this, routingCache)
+                val initError = engine.getLastError()
+                runOnUiThread {
+                    if (isDestroyed || isFinishing) return@runOnUiThread
+                    routingEngine = engine
+                    routingEngineReady = initError == null
+                    if (initError != null) {
+                        transcriptionText.text = "Offline routing failed: $initError"
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(tag, "Failed to initialize offline routing", e)
+                runOnUiThread {
+                    if (!isDestroyed && !isFinishing) {
+                        transcriptionText.text = "Offline routing failed: ${e.message}"
+                    }
+                }
+            }
+        }
+    }
+
+    private fun ensureRoutingReady(): Boolean {
+        if (!::routingEngine.isInitialized || !routingEngineReady) {
+            transcriptionText.text = "Offline routing is still loading. Wait a few seconds and try again."
+            return false
+        }
+        return true
+    }
+
+    private fun maybeStartVoiceModel() {
+        if (!audioPermissionGranted || !mapInitializationComplete || voiceModelInitializationStarted) {
+            return
+        }
+        voiceModelInitializationStarted = true
+        initModel()
+    }
+
+    private fun dismissLaunchOverlayIfReady() {
+        if (launchOverlayDismissed || !::launchOverlay.isInitialized) return
+        val elapsed = SystemClock.elapsedRealtime() - launchStartedAtMs
+        val delayMs = (1500L - elapsed).coerceAtLeast(0L)
+        launchOverlayDismissed = true
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (!::launchOverlay.isInitialized || isDestroyed || isFinishing) return@postDelayed
+            launchOverlay.animate()
+                .alpha(0f)
+                .setDuration(320L)
+                .withEndAction {
+                    launchOverlay.visibility = View.GONE
+                }
+                .start()
+        }, delayMs)
+    }
+
+    // ── Team Mesh Setup ──────────────────────────────────────────────────
+
+    private fun setupTeamMesh() {
+        lbm = LocalBroadcastManager.getInstance(this)
+        teamLocationManager = TeamLocationManager()
+
+        // Register receivers
+        val filter = IntentFilter().apply {
+            addAction(TeamMeshService.ACTION_PEER_POSITION)
+            addAction(TeamMeshService.ACTION_HAZARD_ADD)
+            addAction(TeamMeshService.ACTION_HAZARD_CLEAR)
+            addAction(TeamMeshService.ACTION_HAZARD_CLEAR_ALL)
+            addAction(TeamMeshService.ACTION_STATE_REQUEST)
+        }
+        lbm.registerReceiver(meshReceiver, filter)
+
+        // Load or generate device ID
+        val prefs = getSharedPreferences("veer_rakshak_prefs", MODE_PRIVATE)
+        myDeviceId = prefs.getString("device_id", null) ?: run {
+            val id = java.util.UUID.randomUUID().toString().take(8)
+            prefs.edit().putString("device_id", id).apply()
+            id
+        }
+        myCallsign = prefs.getString("callsign", null) ?: run {
+            // First launch — show callsign setup dialog
+            showCallsignSetupDialog()
+            "ALPHA-1"
+        }
+
+        // Update sidebar callsign label
+        findViewById<TextView?>(R.id.myCallsignLabel)?.text = myCallsign
+
+        // Edit callsign button
+        findViewById<android.widget.Button?>(R.id.btnEditCallsign)?.setOnClickListener {
+            drawerLayout.closeDrawers()
+            showCallsignSetupDialog()
+        }
+
+        // Listen for team updates — refresh map markers
+        teamLocationManager.setListener(object : TeamLocationManager.Listener {
+            override fun onTeamUpdated(members: List<TeamMember>) {
+                updateTeamOverlay(members)
+                updateTeamSidebarList(members)
+            }
+        })
+
+        // Start the mesh service
+        startMeshService()
+    }
+
+    private fun startMeshService() {
+        val intent = Intent(this, TeamMeshService::class.java).apply {
+            putExtra(TeamMeshService.EXTRA_MEMBER_ID, myDeviceId)
+            putExtra(TeamMeshService.EXTRA_CALLSIGN, myCallsign)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        // Announce ourselves and request state from existing peers
+        val stateReqIntent = Intent(this, TeamMeshService::class.java).apply {
+            action = TeamMeshService.ACTION_SEND_STATE_REQUEST
+            putExtra(TeamMeshService.EXTRA_MEMBER_ID, myDeviceId)
+        }
+        startService(stateReqIntent)
+    }
+
+    private fun updateMeshServicePosition(lat: Double, lon: Double, accuracy: Float) {
+        val intent = Intent(this, TeamMeshService::class.java).apply {
+            putExtra(TeamMeshService.EXTRA_MEMBER_ID, myDeviceId)
+            putExtra(TeamMeshService.EXTRA_CALLSIGN,  myCallsign)
+            putExtra(TeamMeshService.EXTRA_LAT,       lat)
+            putExtra(TeamMeshService.EXTRA_LON,       lon)
+            putExtra(TeamMeshService.EXTRA_ACCURACY,  accuracy)
+        }
+        startService(intent)
+    }
+
+    private fun showCallsignSetupDialog() {
+        val input = android.widget.EditText(this).apply {
+            hint = "e.g. BRAVO-2"
+            setText(myCallsign)
+            filters = arrayOf(android.text.InputFilter.AllCaps(), android.text.InputFilter.LengthFilter(12))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("👤 Set Your Callsign")
+            .setMessage("Used to identify you on the team map.")
+            .setView(input)
+            .setPositiveButton("CONFIRM") { _, _ ->
+                val newCallsign = input.text.toString().trim().ifBlank { "ALPHA-1" }
+                myCallsign = newCallsign
+                getSharedPreferences("veer_rakshak_prefs", MODE_PRIVATE)
+                    .edit().putString("callsign", newCallsign).apply()
+                findViewById<TextView?>(R.id.myCallsignLabel)?.text = newCallsign
+                startMeshService()
+                transcriptionText.text = "Callsign set to $newCallsign"
+            }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun applyRemoteHazardAdd(json: String) {
+        try {
+            // Could be a single zone object or a JSON array (state dump)
+            if (json.startsWith("[")) {
+                val arr = org.json.JSONArray(json)
+                for (i in 0 until arr.length()) applyZoneObject(arr.getJSONObject(i))
+            } else {
+                applyZoneObject(org.json.JSONObject(json))
+            }
+            updateHazardZoneOverlay()
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to apply remote hazard: ${e.message}")
+        }
+    }
+
+    private fun applyZoneObject(obj: org.json.JSONObject) {
+        val typeStr = obj.optString("hazardType", obj.optString("type", "HOSTILE_AREA"))
+        val type = try { HazardZoneManager.HazardType.valueOf(typeStr) }
+                   catch (e: Exception) { HazardZoneManager.HazardType.HOSTILE_AREA }
+        val lat    = obj.optDouble("lat", 0.0)
+        val lon    = obj.optDouble("lon", 0.0)
+        val radius = obj.optDouble("radiusMeters", 200.0)
+        val label  = obj.optString("label", type.label)
+        val existingId = obj.optString("id", "")
+        if (existingId.isNotBlank() && hazardManager.zones.any { it.id == existingId }) return
+        hazardManager.addZone(
+            type = type,
+            center = com.mapbox.mapboxsdk.geometry.LatLng(lat, lon),
+            radiusMeters = radius,
+            label = label,
+            id = existingId.ifBlank { null }
+        )
+        transcriptionText.text = "⚠️ Peer shared: ${type.label} zone added to map."
+        rerouteActiveRoute("Peer hazard update applied.")
+    }
+
+    private fun broadcastHazardStateDump() {
+        if (!hazardManager.hasZones()) return
+        val zonesArr = org.json.JSONArray()
+        hazardManager.zones.forEach { zone ->
+            zonesArr.put(org.json.JSONObject().apply {
+                put("id", zone.id)
+                put("hazardType", zone.type.name)
+                put("lat", zone.center.latitude)
+                put("lon", zone.center.longitude)
+                put("radiusMeters", zone.radiusMeters)
+                put("label", zone.label)
+            })
+        }
+        val intent = Intent(this, TeamMeshService::class.java).apply {
+            action = TeamMeshService.ACTION_SEND_STATE_DUMP
+            putExtra(TeamMeshService.EXTRA_ZONE_JSON, zonesArr.toString())
+        }
+        startService(intent)
+    }
+
+    private fun broadcastHazardAdd(zone: HazardZoneManager.HazardZone) {
+        val zoneJson = org.json.JSONObject().apply {
+            put("id",           zone.id)
+            put("hazardType",   zone.type.name)
+            put("lat",          zone.center.latitude)
+            put("lon",          zone.center.longitude)
+            put("radiusMeters", zone.radiusMeters)
+            put("label",        zone.label)
+        }.toString()
+        val meshPacket = org.json.JSONObject().apply {
+            put("type", "hazard_add")
+            put("senderId", myDeviceId)
+            put("zone", org.json.JSONObject(zoneJson))
+        }.toString()
+        val intent = Intent(this, TeamMeshService::class.java).apply {
+            action = TeamMeshService.ACTION_SEND_HAZARD_ADD
+            putExtra(TeamMeshService.EXTRA_ZONE_JSON, meshPacket)
+        }
+        startService(intent)
+    }
+
+    private fun broadcastHazardClear(zoneId: String) {
+        val intent = Intent(this, TeamMeshService::class.java).apply {
+            action = TeamMeshService.ACTION_SEND_HAZARD_CLEAR
+            putExtra(TeamMeshService.EXTRA_ZONE_ID, zoneId)
+        }
+        startService(intent)
+    }
+
+    private fun broadcastHazardClearAll() {
+        startService(Intent(this, TeamMeshService::class.java).apply {
+            action = TeamMeshService.ACTION_SEND_HAZARD_CLEAR_ALL
+        })
+    }
+
+    // ── Team Map Overlay ───────────────────────────────────────────────
+
+    private fun updateTeamOverlay(members: List<TeamMember>) {
+        mapboxMap?.getStyle { style ->
+            style.removeLayer(TEAM_LABEL_LAYER_ID)
+            style.removeLayer(TEAM_LAYER_ID)
+            style.removeSource(TEAM_SOURCE_ID)
+            if (members.isEmpty()) return@getStyle
+
+            val featuresArray = org.json.JSONArray()
+            members.forEach { m ->
+                val color = if (m.isStale) "#607D8B" else "#00E5FF"
+                val feat = org.json.JSONObject().apply {
+                    put("type", "Feature")
+                    put("geometry", org.json.JSONObject().apply {
+                        put("type", "Point")
+                        put("coordinates", org.json.JSONArray().apply {
+                            put(m.lon); put(m.lat)
+                        })
+                    })
+                    put("properties", org.json.JSONObject().apply {
+                        put("callsign", m.callsign)
+                        put("color", color)
+                        put("stale", m.isStale)
+                    })
+                }
+                featuresArray.put(feat)
+            }
+            val fc = org.json.JSONObject().apply {
+                put("type", "FeatureCollection")
+                put("features", featuresArray)
+            }.toString()
+
+            try {
+                style.addSource(GeoJsonSource(TEAM_SOURCE_ID, fc))
+                style.addLayer(
+                    com.mapbox.mapboxsdk.style.layers.CircleLayer(TEAM_LAYER_ID, TEAM_SOURCE_ID)
+                        .withProperties(
+                            PropertyFactory.circleRadius(10f),
+                            PropertyFactory.circleColor(
+                                com.mapbox.mapboxsdk.style.expressions.Expression.get("color")
+                            ),
+                            PropertyFactory.circleStrokeWidth(2f),
+                            PropertyFactory.circleStrokeColor("#FFFFFF")
+                        )
+                )
+                style.addLayer(
+                    com.mapbox.mapboxsdk.style.layers.SymbolLayer(TEAM_LABEL_LAYER_ID, TEAM_SOURCE_ID)
+                        .withProperties(
+                            PropertyFactory.textField(
+                                com.mapbox.mapboxsdk.style.expressions.Expression.get("callsign")
+                            ),
+                            PropertyFactory.textSize(11f),
+                            PropertyFactory.textColor("#FFFFFF"),
+                            PropertyFactory.textOffset(arrayOf(0f, -1.8f)),
+                            PropertyFactory.textFont(arrayOf("Open Sans Bold", "Arial Unicode MS Bold"))
+                        )
+                )
+            } catch (e: Exception) {
+                Log.e(tag, "Team overlay error: ${e.message}")
+            }
+        }
+    }
+
+    private fun updateTeamSidebarList(members: List<TeamMember>) {
+        val container = findViewById<android.widget.LinearLayout?>(R.id.teamMemberList) ?: return
+        val statusText = findViewById<TextView?>(R.id.meshStatusText)
+        container.removeAllViews()
+        if (members.isEmpty()) {
+            statusText?.text = "◌  SOLO — no peers"
+            statusText?.setTextColor(android.graphics.Color.parseColor("#607D8B"))
+            return
+        }
+        statusText?.text = "● ${members.size} ONLINE"
+        statusText?.setTextColor(android.graphics.Color.parseColor("#00E5FF"))
+        members.forEach { m ->
+            val row = android.widget.TextView(this).apply {
+                val age = (System.currentTimeMillis() - m.lastSeenMs) / 1000
+                text = if (m.isStale) "◌ ${m.callsign}  (${age}s ago)"
+                       else           "● ${m.callsign}  LIVE"
+                setTextColor(if (m.isStale)
+                    android.graphics.Color.parseColor("#607D8B")
+                else android.graphics.Color.parseColor("#00E5FF"))
+                textSize = 12f
+                typeface = android.graphics.Typeface.MONOSPACE
+                val lp = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                lp.topMargin = 6
+                layoutParams = lp
+            }
+            container.addView(row)
+        }
+    }
+
+    // ──────────────────────────────────────────────────
 
     // ── Drawer, top bar, and sidebar wiring ──────────────────────────────────
 
@@ -351,26 +833,32 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             drawerLayout.openDrawer(androidx.core.view.GravityCompat.START)
         }
 
-        // Dark mode toggle (top bar icon)
+        // Top-right compass / recenter action
         findViewById<ImageButton>(R.id.btnDarkModeToggle).setOnClickListener {
-            isDarkMode = !isDarkMode
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit().putBoolean(PREF_KEY_DARK_MODE, isDarkMode).apply()
-            applyThemeMode(isDarkMode)
-            // Recreate to apply theme change
-            recreate()
+            if (recenterOnOperator()) {
+                transcriptionText.text = "Compass aligned to operator position."
+            } else {
+                transcriptionText.text = "Compass unavailable: waiting for operator position."
+            }
         }
 
-        // Sidebar dark mode switch (mirrors top bar toggle)
-        val switchDark = findViewById<androidx.appcompat.widget.SwitchCompat?>(R.id.switchDarkMode)
-        switchDark?.isChecked = isDarkMode
-        switchDark?.setOnCheckedChangeListener { _, checked ->
-            isDarkMode = checked
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit().putBoolean(PREF_KEY_DARK_MODE, isDarkMode).apply()
-            applyThemeMode(isDarkMode)
-            drawerLayout.closeDrawers()
-            recreate()
+        compassFloatingButton.setOnClickListener {
+            val currentCamera = mapboxMap?.cameraPosition
+            val target = currentCamera?.target ?: effectiveOperatorLocation()?.let {
+                LatLng(it.latitude, it.longitude)
+            }
+            if (target != null) {
+                mapboxMap?.cameraPosition = CameraPosition.Builder()
+                    .target(target)
+                    .zoom(currentCamera?.zoom ?: (mapPackageInfo?.maxZoom ?: 15).toDouble().coerceAtMost(16.0))
+                    .bearing(0.0)
+                    .tilt(0.0)
+                    .build()
+                syncCompassBearing()
+                transcriptionText.text = "Compass reset to north."
+            } else {
+                transcriptionText.text = "Compass unavailable: map is still loading."
+            }
         }
 
         // Region items
@@ -403,6 +891,14 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             transcriptionText.text = "Destination cleared."
             drawerLayout.closeDrawers()
         }
+        findViewById<View?>(R.id.btnDrawerClearHazards)?.setOnClickListener {
+            hazardManager.clearAll()
+            updateHazardZoneOverlay()
+            broadcastHazardClearAll()
+            rerouteActiveRoute("Hazards cleared. Refreshing route.")
+            transcriptionText.text = "All hazard zones cleared."
+            drawerLayout.closeDrawers()
+        }
 
         // Route card close button
         findViewById<ImageButton?>(R.id.btnCloseRouteCard)?.setOnClickListener {
@@ -419,6 +915,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             hideDestinationPanel()
             // Guard: ensure a destination has been selected before routing
             selectedDestination ?: return@setOnClickListener
+            if (!ensureRoutingReady()) return@setOnClickListener
             transcriptionText.text = "INTENT: Route to selected point\n\nCalculating Offline Path..."
             val routeRequestResult = buildRouteRequest("objective")
             if (routeRequestResult == null) {
@@ -434,7 +931,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 return@setOnClickListener
             }
             try {
-                val routeResult = routingEngine.calculateRoute(coords[0], coords[1], coords[2], coords[3])
+                val routeResult = routingEngine.calculateRoute(coords[0], coords[1], coords[2], coords[3], hazardManager)
                 if (routeResult != null) {
                     transcriptionText.text = "Route calculated! Target: ${routeRequestResult.destinationLabel}"
                     drawRouteOnMap(routeResult.coordinates)
@@ -545,7 +1042,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSIONS_REQUEST_RECORD_AUDIO) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                initModel()
+                audioPermissionGranted = true
+                maybeStartVoiceModel()
             } else {
                 transcriptionText.text = "Microphone permission denied. Voice disabled."
             }
@@ -571,6 +1069,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 val intent = spatialEngine.parseCommand(parsedText)
                 if (intent != null) {
                     if (intent.action == "route") {
+                        if (!ensureRoutingReady()) return
                         transcriptionText.text = "INTENT: Route to ${intent.entity}\n\nCalculating Offline Path (GraphHopper)..."
                         val routeRequestResult = buildRouteRequest(intent.entity)
                         if (routeRequestResult == null) {
@@ -590,7 +1089,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                                 routeRequest[0],
                                 routeRequest[1],
                                 routeRequest[2],
-                                routeRequest[3]
+                                routeRequest[3],
+                                hazardManager
                             )
                             if (routeResult != null) {
                                 val destinationLabel = routeRequestResult.destinationLabel
@@ -621,6 +1121,37 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                         } else {
                             transcriptionText.text = "Cannot recenter: waiting for GPS fix inside the offline zone."
                         }
+
+                    // ── Hazard Zone Intents ─────────────────────────────────────────
+                    } else if (intent.action == "clear_hazards") {
+                        hazardManager.clearAll()
+                        updateHazardZoneOverlay()
+                        broadcastHazardClearAll()  // sync to team
+                        transcriptionText.text = "All hazard zones cleared."
+                        rerouteActiveRoute("Hazards cleared. Refreshing route.")
+
+                    } else if (intent.action == "mark_hazard") {
+                        val loc = currentLocation
+                        if (loc == null) {
+                            transcriptionText.text = "Cannot mark hazard: no GPS fix yet."
+                        } else {
+                            val hazardType = try {
+                                HazardZoneManager.HazardType.valueOf(intent.entity)
+                            } catch (e: Exception) {
+                                HazardZoneManager.HazardType.HOSTILE_AREA
+                            }
+                            val radiusMeters = if (intent.unit.startsWith("k"))
+                                intent.distance * 1000.0 else intent.distance.toDouble()
+                            val center = com.mapbox.mapboxsdk.geometry.LatLng(
+                                loc.latitude, loc.longitude
+                            )
+                            val zone = hazardManager.addZone(hazardType, center, radiusMeters)
+                            updateHazardZoneOverlay()
+                            broadcastHazardAdd(zone)  // sync to team
+                            transcriptionText.text = "⚠️ ${zone.type.label} marked at operator position (${radiusMeters.toInt()}m radius).\nRoute recalculation will avoid this zone."
+                            rerouteActiveRoute("${zone.type.label} added. Recalculating safe route.")
+                        }
+                    // ─────────────────────────────────────────────────────────────────
                     } else {
                         val formatted = "INTENT:\nAction: ${intent.action}\nTarget: ${intent.entity}\nRange: ${intent.distance} ${intent.unit}"
                         transcriptionText.text = "$formatted\n\nCalculating SpatiaLite Buffer..."
@@ -663,7 +1194,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             val lineString = LineString.fromLngLats(points)
             val feature = Feature.fromGeometry(lineString)
             val featureCollection = FeatureCollection.fromFeatures(arrayOf(feature))
-            
+
             val source = style.getSourceAs<GeoJsonSource>("tactical-route-source")
             if (source != null) {
                 source.setGeoJson(featureCollection)
@@ -671,11 +1202,122 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 style.addSource(GeoJsonSource(ROUTE_SOURCE_ID, featureCollection))
                 style.addLayer(LineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID).withProperties(
                     PropertyFactory.lineWidth(5f),
-                    PropertyFactory.lineColor("#F3C969") // Tactical amber — better contrast on dark map
+                    PropertyFactory.lineColor("#2F80ED")
                 ))
             }
         }
     }
+
+    // ── Hazard Zone FAB & Overlay ────────────────────────────────────────────────
+
+    private fun setupHazardFab() {
+        val fab = findViewById<android.widget.ImageButton?>(R.id.hazardFab) ?: return
+        fab.setOnClickListener {
+            isHazardDrawMode = !isHazardDrawMode
+            if (isHazardDrawMode) {
+                fab.setBackgroundResource(R.drawable.bg_hazard_fab)
+                fab.setColorFilter(android.graphics.Color.parseColor("#E74C3C"))
+                transcriptionText.text = "⚠️ HAZARD DRAW MODE ACTIVE\nLong-press map to place a hazard zone at that location."
+            } else {
+                fab.clearColorFilter()
+                transcriptionText.text = "Hazard draw mode off."
+            }
+        }
+        // Restore hazard overlay after map style loads
+        mapboxMap?.getStyle { updateHazardZoneOverlay() }
+    }
+
+    /**
+     * Called when the map is long-pressed and hazard draw mode is active.
+     * Wraps the existing onMapLongClick handler.
+     */
+    fun onHazardMapLongPress(latLng: com.mapbox.mapboxsdk.geometry.LatLng) {
+        if (!isHazardDrawMode) return
+        showHazardTypePickerDialog(latLng)
+    }
+
+    private fun showHazardTypePickerDialog(latLng: com.mapbox.mapboxsdk.geometry.LatLng) {
+        val types = HazardZoneManager.HazardType.values()
+        val labels = types.map { it.label }.toTypedArray()
+        android.app.AlertDialog.Builder(this)
+            .setTitle("⚠️ Mark Hazard Zone")
+            .setItems(labels) { _, which ->
+                val type = types[which]
+                showRadiusPickerDialog(latLng, type)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showRadiusPickerDialog(
+        latLng: com.mapbox.mapboxsdk.geometry.LatLng,
+        type: HazardZoneManager.HazardType
+    ) {
+        val radiusOptions = arrayOf("50m", "100m", "200m", "500m", "1 km")
+        val radiusValues = doubleArrayOf(50.0, 100.0, 200.0, 500.0, 1000.0)
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Radius — ${type.label}")
+            .setItems(radiusOptions) { _, which ->
+                val zone = hazardManager.addZone(type, latLng, radiusValues[which])
+                updateHazardZoneOverlay()
+                broadcastHazardAdd(zone)  // sync to team
+                // Warn if destination is inside this zone
+                val destWarning = selectedDestination?.let { dest ->
+                    if (hazardManager.isPointInAnyZone(dest.latitude, dest.longitude) != null)
+                        "\n⚠️ WARNING: Selected destination is inside a hazard zone!"
+                    else ""
+                } ?: ""
+                transcriptionText.text = "⚠️ ${zone.type.label} zone placed (${radiusValues[which].toInt()}m radius).$destWarning"
+                rerouteActiveRoute("${zone.type.label} zone added. Recalculating safe route.")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * Renders all active hazard zones as coloured fill polygons on the map.
+     * Uses per-zone color from HazardType for visual distinction.
+     */
+    private fun updateHazardZoneOverlay() {
+        mapboxMap?.getStyle { style ->
+            // Remove existing layers/source
+            style.removeLayer(HAZARD_FILL_LAYER_ID)
+            style.removeLayer(HAZARD_STROKE_LAYER_ID)
+            style.removeSource(HAZARD_SOURCE_ID)
+
+            if (!hazardManager.hasZones()) return@getStyle
+
+            try {
+                val geoJsonStr = hazardManager.toMapGeoJson()
+                val source = GeoJsonSource(HAZARD_SOURCE_ID, geoJsonStr)
+                style.addSource(source)
+
+                // Semi-transparent fill (color driven by feature property)
+                val fillLayer = FillLayer(HAZARD_FILL_LAYER_ID, HAZARD_SOURCE_ID).withProperties(
+                    PropertyFactory.fillOpacity(0.35f),
+                    PropertyFactory.fillColor(
+                        com.mapbox.mapboxsdk.style.expressions.Expression.get("color")
+                    )
+                )
+                style.addLayerBelow(fillLayer, ROUTE_LAYER_ID)
+
+                // Stroke
+                val strokeLayer = LineLayer(HAZARD_STROKE_LAYER_ID, HAZARD_SOURCE_ID).withProperties(
+                    PropertyFactory.lineWidth(2f),
+                    PropertyFactory.lineColor(
+                        com.mapbox.mapboxsdk.style.expressions.Expression.get("color")
+                    ),
+                    PropertyFactory.lineOpacity(0.9f)
+                )
+                style.addLayerBelow(strokeLayer, ROUTE_LAYER_ID)
+
+            } catch (e: Exception) {
+                Log.e(tag, "Failed to render hazard zones on map", e)
+            }
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
 
     private fun drawCurrentLocation(location: Location) {
         mapboxMap?.getStyle { style ->
@@ -726,7 +1368,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     // --- Utility Methods for Offline Map ---
 
     private fun prepareStyleJson(tilesRoot: String, packageInfo: MapPackageInfo): String {
-        val styleFile = File(cacheDir, "tactical_offline_style.json")
+        val styleFile = File(cacheDir, "tactical_offline_style_${selectedRegion.key}.json")
         try {
             val styleString = assets.open("styles/tactical_offline_style.json").bufferedReader().use { it.readText() }
             val updatedStyle = styleString
@@ -778,9 +1420,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         }
     }
 
-    private fun extractMbtilesToRasterTiles(mbtilesPath: String): String {
-        val packageInfo = mapPackageInfo ?: throw IOException("Map package info missing before tile extraction")
-        val tilesRoot = File(cacheDir, "offline-raster-tiles")
+    private fun extractMbtilesToRasterTiles(mbtilesPath: String, packageInfo: MapPackageInfo): String {
+        val tilesRoot = File(cacheDir, "offline-raster-tiles-${selectedRegion.key}")
         val markerFile = File(tilesRoot, ".extract-complete")
         val sourceSignature = buildMbtilesSignature(File(mbtilesPath), packageInfo)
         if (markerFile.exists() && markerFile.readText() == sourceSignature) {
@@ -900,7 +1541,15 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             return null
         }
 
-        val placeMatch = placeIndex.resolve(destinationPhrase, currentLocation) ?: return null
+        val boundsFilter = OfflinePlaceIndex.BoundsFilter(
+            west = packageInfo.bounds[0],
+            south = packageInfo.bounds[1],
+            east = packageInfo.bounds[2],
+            north = packageInfo.bounds[3]
+        )
+        val placeMatch = placeIndex.resolve(destinationPhrase, currentLocation, boundsFilter)
+            ?: placeIndex.resolve(destinationPhrase, currentLocation)
+            ?: return null
         val destinationLatLng = LatLng(placeMatch.lat, placeMatch.lon)
         selectedDestination = destinationLatLng
         drawDestinationMarker(destinationLatLng)
@@ -926,7 +1575,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         }
         selectedDestination = point
         drawDestinationMarker(point)
-        transcriptionText.text = "Destination selected. Say \"route to objective\" to navigate."
+        transcriptionText.text = getString(R.string.destination_selected_hint)
         showDestinationPanel(point, "Selected Point")
     }
 
@@ -1072,7 +1721,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         } else {
             1.0
         }
-        val remainingDurationMillis = (activeRouteTotalDurationMillis * remainingRatio).toLong()
+        val remainingDurationMillis = estimateRemainingDurationMillis(remainingDistanceMeters, remainingRatio)
         val progressPct = ((1.0 - remainingRatio) * 100).toInt()
         val destinationLabel = activeRouteDestinationLabel ?: "objective"
 
@@ -1085,10 +1734,73 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         routeSummaryCard.visibility = View.VISIBLE
     }
 
+    private fun estimateRemainingDurationMillis(
+        remainingDistanceMeters: Double,
+        remainingRatio: Double
+    ): Long {
+        val routeAverageSpeed = if (activeRouteTotalDurationMillis > 0L) {
+            activeRouteTotalDistanceMeters / (activeRouteTotalDurationMillis / 1000.0)
+        } else {
+            0.0
+        }
+        val observedSpeed = smoothedSpeedMetersPerSecond
+        val effectiveSpeed = when {
+            selectedRegion.usesDemoOperator -> routeAverageSpeed
+            observedSpeed == null || observedSpeed < 0.8 -> routeAverageSpeed
+            routeAverageSpeed <= 0.0 -> observedSpeed
+            else -> {
+                val minSpeed = routeAverageSpeed * 0.55
+                val maxSpeed = routeAverageSpeed * 1.85
+                observedSpeed.coerceIn(minSpeed, maxSpeed)
+            }
+        }
+
+        if (effectiveSpeed > 0.0) {
+            return ((remainingDistanceMeters / effectiveSpeed) * 1000.0).toLong().coerceAtLeast(60_000L)
+        }
+
+        return (activeRouteTotalDurationMillis * remainingRatio).toLong().coerceAtLeast(60_000L)
+    }
+
+    private fun updateObservedSpeed(location: Location) {
+        if (selectedRegion.usesDemoOperator) return
+
+        val rawSpeed = when {
+            location.hasSpeed() && location.speed > 0.0f -> location.speed.toDouble()
+            else -> {
+                val previous = lastEtaSampleLocation
+                if (previous != null && location.time > previous.time) {
+                    val deltaSeconds = (location.time - previous.time) / 1000.0
+                    if (deltaSeconds >= 1.0) {
+                        distanceBetweenMeters(
+                            previous.latitude,
+                            previous.longitude,
+                            location.latitude,
+                            location.longitude
+                        ) / deltaSeconds
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                }
+            }
+        }
+
+        if (rawSpeed in 0.8..55.0) {
+            smoothedSpeedMetersPerSecond = smoothedSpeedMetersPerSecond?.let { existing ->
+                (existing * 0.65) + (rawSpeed * 0.35)
+            } ?: rawSpeed
+        }
+
+        lastEtaSampleLocation = Location(location)
+    }
+
     private fun maybeRerouteOnDeviation(location: Location) {
         if (selectedRegion.usesDemoOperator) return
         val routeCoords = activeRouteCoords ?: return
         if (routeCoords.size < 2 || rerouteInProgress) return
+        if (!::routingEngine.isInitialized || !routingEngineReady) return
         if (!isInsideOfflineBounds(location)) return
 
         val now = System.currentTimeMillis()
@@ -1119,7 +1831,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 location.latitude,
                 location.longitude,
                 destination.latitude,
-                destination.longitude
+                destination.longitude,
+                hazardManager
             )
             if (routeResult != null) {
                 drawRouteOnMap(routeResult.coordinates)
@@ -1153,6 +1866,95 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             activeRouteDestinationLabel ?: "objective"
         )
     }
+
+    private fun rerouteActiveRoute(statusMessage: String) {
+        val packageInfo = mapPackageInfo ?: return
+        val operatorLocation = effectiveOperatorLocation() ?: return
+        val destination = currentDestinationForReroute(packageInfo) ?: return
+        if (rerouteInProgress || !::routingEngine.isInitialized || !routingEngineReady) return
+
+        rerouteInProgress = true
+        try {
+            val routeResult = routingEngine.calculateRoute(
+                operatorLocation.latitude,
+                operatorLocation.longitude,
+                destination.latitude,
+                destination.longitude,
+                hazardManager
+            )
+            if (routeResult != null) {
+                drawRouteOnMap(routeResult.coordinates)
+                setActiveRoute(routeResult, destination.label)
+                updateActiveRouteProgress()
+                transcriptionText.text = statusMessage
+            } else {
+                val routingError = routingEngine.getLastError() ?: "Unknown reroute error"
+                transcriptionText.text = "$statusMessage\nRoute refresh failed: $routingError"
+            }
+        } catch (exception: Exception) {
+            Log.e(tag, "Hazard-triggered reroute failed", exception)
+            transcriptionText.text = "$statusMessage\nRoute refresh error: ${exception.message}"
+        } finally {
+            rerouteInProgress = false
+        }
+    }
+
+    private fun handleShakeZoomTrigger() {
+        val map = mapboxMap ?: return
+        val currentCamera = map.cameraPosition
+        val packageInfo = mapPackageInfo
+        val minZoom = (packageInfo?.minZoom ?: 10).toDouble().coerceAtLeast(8.0)
+        val maxZoom = (packageInfo?.maxZoom ?: 15).toDouble().coerceAtMost(17.0)
+        val nextZoom = if (nextShakeZoomsIn) {
+            (currentCamera.zoom + SHAKE_ZOOM_DELTA).coerceAtMost(maxZoom)
+        } else {
+            (currentCamera.zoom - SHAKE_ZOOM_DELTA).coerceAtLeast(minZoom)
+        }
+
+        map.cameraPosition = CameraPosition.Builder(currentCamera)
+            .zoom(nextZoom)
+            .build()
+        transcriptionText.text = if (nextShakeZoomsIn) {
+            "Shake zoom: zoomed in."
+        } else {
+            "Shake zoom: zoomed out."
+        }
+        nextShakeZoomsIn = !nextShakeZoomsIn
+    }
+
+    private fun syncCompassBearing() {
+        if (!::compassFloatingButton.isInitialized) return
+        val bearing = mapboxMap?.cameraPosition?.bearing?.toFloat() ?: 0f
+        compassFloatingButton.rotation = -bearing
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (event?.sensor?.type != Sensor.TYPE_ACCELEROMETER) return
+
+        val x = event.values.getOrNull(0)?.toDouble() ?: return
+        val y = event.values.getOrNull(1)?.toDouble() ?: return
+        val z = event.values.getOrNull(2)?.toDouble() ?: return
+        val accelerationDelta = sqrt((x * x) + (y * y) + (z * z)) - SensorManager.GRAVITY_EARTH
+        if (kotlin.math.abs(accelerationDelta) < SHAKE_ACCEL_THRESHOLD) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastShakeZoomTriggerTimestampMs < SHAKE_ZOOM_COOLDOWN_MS) return
+
+        shakeImpulseCount = if (now - lastShakeImpulseTimestampMs <= SHAKE_IMPULSE_WINDOW_MS) {
+            shakeImpulseCount + 1
+        } else {
+            1
+        }
+        lastShakeImpulseTimestampMs = now
+
+        if (shakeImpulseCount >= 2) {
+            shakeImpulseCount = 0
+            lastShakeZoomTriggerTimestampMs = now
+            handleShakeZoomTrigger()
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun findNearestRouteIndex(location: Location, routeCoords: List<DoubleArray>): Int {
         var nearestIndex = 0
@@ -1297,6 +2099,15 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     private fun buildDemoOperatorLocation(packageInfo: MapPackageInfo): Location {
+        selectedRegion.demoOperatorLat?.let { lat ->
+            val lon = selectedRegion.demoOperatorLon ?: packageInfo.centerLon
+            return Location("demo-${selectedRegion.key}").apply {
+                latitude = lat
+                longitude = lon
+                accuracy = 3f
+                time = System.currentTimeMillis()
+            }
+        }
         val latSpan = packageInfo.bounds[3] - packageInfo.bounds[1]
         val lonSpan = packageInfo.bounds[2] - packageInfo.bounds[0]
         val lat = packageInfo.centerLat + (latSpan * selectedRegion.startLatFactor)
@@ -1311,6 +2122,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     
     private fun copyAssetToCache(assetName: String): String {
         val outFile = File(cacheDir, "${selectedRegion.key}-${File(assetName).name}")
+        if (outFile.exists() && outFile.length() > 0L) {
+            return outFile.absolutePath
+        }
         try {
             assets.open(assetName).use { input ->
                 FileOutputStream(outFile, false).use { output ->
@@ -1335,7 +2149,6 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             return
         }
 
-        statusText.text = "Unpacking GraphHopper map data..."
         if (cacheFolder.exists()) {
             cacheFolder.deleteRecursively()
         }
@@ -1366,7 +2179,11 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             Log.i(tag, "GraphHopper cache unpacked successfully.")
         } catch (e: Exception) {
             Log.e(tag, "Failed to unpack GraphHopper", e)
-            statusText.text = "Error unpacking GraphHopper: ${e.message}"
+            runOnUiThread {
+                if (!isDestroyed && !isFinishing) {
+                    statusText.text = "Error unpacking GraphHopper: ${e.message}"
+                }
+            }
         }
     }
 
@@ -1418,6 +2235,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             startLocationTracking()
         }
         speechService?.setPause(false)
+        accelerometer?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+        }
     }
 
     override fun onPause() {
@@ -1425,6 +2245,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         mapView.onPause()
         speechService?.setPause(true)
         locationManager.removeUpdates(locationListener)
+        sensorManager.unregisterListener(this)
     }
 
     override fun onStop() {
@@ -1432,6 +2253,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         mapView.onStop()
         speechService?.setPause(true)
         locationManager.removeUpdates(locationListener)
+        sensorManager.unregisterListener(this)
     }
 
     override fun onLowMemory() {
@@ -1445,6 +2267,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         speechService?.cancel()
         speechService?.shutdown()
         model?.close()
+        sensorManager.unregisterListener(this)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

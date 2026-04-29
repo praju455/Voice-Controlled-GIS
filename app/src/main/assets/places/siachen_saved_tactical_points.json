@@ -1,0 +1,123 @@
+[
+  {
+    "name": "base",
+    "normalizedName": "base",
+    "categoryKey": "tactical",
+    "categoryValue": "base",
+    "lat": 35.1943,
+    "lon": 77.2131,
+    "aliases": [
+      "siachen base",
+      "base camp",
+      "command post",
+      "siachen base camp"
+    ]
+  },
+  {
+    "name": "medical point",
+    "normalizedName": "medical point",
+    "categoryKey": "tactical",
+    "categoryValue": "medical",
+    "lat": 35.205,
+    "lon": 77.225,
+    "aliases": [
+      "med point",
+      "aid station",
+      "casualty point",
+      "medical camp"
+    ]
+  },
+  {
+    "name": "extraction",
+    "normalizedName": "extraction",
+    "categoryKey": "tactical",
+    "categoryValue": "extraction",
+    "lat": 34.65,
+    "lon": 77.38,
+    "aliases": [
+      "extract",
+      "pickup point",
+      "airfield",
+      "thoise"
+    ]
+  },
+  {
+    "name": "checkpoint alpha",
+    "normalizedName": "checkpoint alpha",
+    "categoryKey": "tactical",
+    "categoryValue": "checkpoint",
+    "lat": 34.68,
+    "lon": 77.57,
+    "aliases": [
+      "alpha checkpoint",
+      "checkpoint a",
+      "partapur",
+      "logistics node"
+    ]
+  },
+  {
+    "name": "safe zone",
+    "normalizedName": "safe zone",
+    "categoryKey": "tactical",
+    "categoryValue": "safe_zone",
+    "lat": 34.72,
+    "lon": 77.54,
+    "aliases": [
+      "safe area",
+      "fallback zone",
+      "partapur safe zone"
+    ]
+  },
+  {
+    "name": "bilafond post",
+    "normalizedName": "bilafond post",
+    "categoryKey": "tactical",
+    "categoryValue": "forward_post",
+    "lat": 35.3833,
+    "lon": 76.95,
+    "aliases": [
+      "bilafond la",
+      "saltoro pass",
+      "bilafond"
+    ]
+  },
+  {
+    "name": "gyong post",
+    "normalizedName": "gyong post",
+    "categoryKey": "tactical",
+    "categoryValue": "forward_post",
+    "lat": 35.1715,
+    "lon": 77.0692,
+    "aliases": [
+      "gyong la",
+      "gyong",
+      "southern post"
+    ]
+  },
+  {
+    "name": "sia la post",
+    "normalizedName": "sia la post",
+    "categoryKey": "tactical",
+    "categoryValue": "forward_post",
+    "lat": 35.5758,
+    "lon": 76.7888,
+    "aliases": [
+      "sia la",
+      "northern post",
+      "upper pass"
+    ]
+  },
+  {
+    "name": "saltoro ridge",
+    "normalizedName": "saltoro ridge",
+    "categoryKey": "tactical",
+    "categoryValue": "observation",
+    "lat": 35.32,
+    "lon": 76.99,
+    "aliases": [
+      "observation ridge",
+      "saltoro",
+      "ridge post"
+    ]
+  }
+]

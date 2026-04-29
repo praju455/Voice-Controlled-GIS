@@ -2,14 +2,52 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="tactical_primary">#10262B</color>
-    <color name="tactical_primary_variant">#0A171A</color>
-    <color name="tactical_secondary">#15C7B8</color>
-    <color name="tactical_secondary_variant">#0F8B81</color>
-    <color name="tactical_on_dark">#EAF7FA</color>
-    <color name="tactical_card">#CC071015</color>
-    <color name="tactical_card_alt">#D9111F24</color>
-    <color name="tactical_outline">#6650E0D0</color>
-    <color name="tactical_warning">#F3C969</color>
-    <color name="tactical_muted">#A9C0C5</color>
+
+    <!-- ── TACTICAL DARK theme ── -->
+    <color name="tactical_primary">#182118</color>
+    <color name="tactical_primary_variant">#0D120D</color>
+    <color name="tactical_secondary">#8FAF72</color>
+    <color name="tactical_secondary_variant">#60784B</color>
+    <color name="tactical_on_dark">#EEF3E4</color>
+    <color name="tactical_card">#EC121811</color>
+    <color name="tactical_card_alt">#F0182117</color>
+    <color name="tactical_outline">#5E6C8F63</color>
+    <color name="tactical_warning">#D7BF7A</color>
+    <color name="tactical_muted">#95A08B</color>
+    <color name="tactical_surface">#0B100B</color>
+    <color name="tactical_drawer_bg">#0E140F</color>
+    <color name="tactical_divider">#263227</color>
+    <color name="tactical_chip_bg">#2A344528</color>
+    <color name="tactical_chip_on">#DDE7CE</color>
+    <color name="tactical_action_bg">#D9161E15</color>
+    <color name="tactical_icon_plate">#1E2A1A</color>
+
+    <!-- ── STANDARD LIGHT (day) theme ── -->
+    <color name="day_primary">#1E3A2F</color>
+    <color name="day_primary_variant">#152C22</color>
+    <color name="day_secondary">#4CAF73</color>
+    <color name="day_secondary_variant">#2E7D52</color>
+    <color name="day_on_surface">#0D1F18</color>
+    <color name="day_card">#ECEEE8</color>
+    <color name="day_card_alt">#DDE2D8</color>
+    <color name="day_outline">#80C8D5BE</color>
+    <color name="day_warning">#D4900A</color>
+    <color name="day_muted">#4A6558</color>
+    <color name="day_surface">#F5F7F2</color>
+    <color name="day_drawer_bg">#EBF0E7</color>
+    <color name="day_divider">#C8D5C0</color>
+
+    <!-- ── Shared Status / Route Colours ── -->
+    <color name="status_on_route">#2ECC71</color>
+    <color name="status_off_route">#E74C3C</color>
+    <color name="status_rerouting">#F39C12</color>
+    <color name="route_line_amber">#F3C969</color>
+    <color name="operator_dot">#15C7B8</color>
+    <color name="destination_dot">#E74C3C</color>
+    <color name="mic_active">#2ECC71</color>
+    <color name="mic_processing">#F39C12</color>
+    <color name="progress_track">#26EAF3E4</color>
+
+    <!-- ── Splash ── -->
+    <color name="splash_bg">#090D09</color>
 </resources>
