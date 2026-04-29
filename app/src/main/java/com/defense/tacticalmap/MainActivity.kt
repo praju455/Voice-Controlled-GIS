@@ -77,6 +77,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private lateinit var micStatusLabel: TextView
     private var micPulseAnim: AnimationDrawable? = null
     private var isDarkMode = true
+    private lateinit var selectedRegion: RegionProfile
 
     private val tag = "OfflineTacticalMap"
     private var mapPackageInfo: MapPackageInfo? = null
@@ -98,13 +99,13 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     private lateinit var placeIndex: OfflinePlaceIndex
     private val locationListener = LocationListener { location ->
         currentLocation = location
-        drawCurrentLocation(location)
-        updateLocationStatus(location)
+        refreshOperatorPresentation()
         updateActiveRouteProgress()
         maybeRerouteOnDeviation(location)
-        if (!hasCenteredOnOperator && isInsideOfflineBounds(location)) {
+        if (!hasCenteredOnOperator && effectiveOperatorLocation()?.let { isInsideOfflineBounds(it) } == true) {
+            val operatorLocation = effectiveOperatorLocation() ?: return@LocationListener
             mapboxMap?.cameraPosition = CameraPosition.Builder()
-                .target(LatLng(location.latitude, location.longitude))
+                .target(LatLng(operatorLocation.latitude, operatorLocation.longitude))
                 .zoom((mapPackageInfo?.maxZoom ?: 15).toDouble().coerceAtMost(16.0))
                 .build()
             hasCenteredOnOperator = true
@@ -114,6 +115,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     companion object {
         private const val PERMISSIONS_REQUEST_RECORD_AUDIO = 1
         private const val PERMISSIONS_REQUEST_LOCATION = 2
+        private const val PREFS_NAME = "veer_rakshak_prefs"
+        private const val PREF_KEY_DARK_MODE = "dark_mode"
+        private const val PREF_KEY_REGION = "selected_region"
         private const val OPERATOR_SOURCE_ID = "operator-location-source"
         private const val OPERATOR_LAYER_ID = "operator-location-layer"
         private const val DESTINATION_SOURCE_ID = "destination-source"
@@ -137,10 +141,32 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             get() = (bounds[0] + bounds[2]) / 2.0
     }
 
+    private data class RegionProfile(
+        val key: String,
+        val badgeLabel: String,
+        val displayName: String,
+        val usesDemoOperator: Boolean,
+        val startLatFactor: Double,
+        val startLonFactor: Double
+    )
+
+    private val bengaluruRegion = RegionProfile("bengaluru", "● BENGALURU", "Bengaluru Zone", false, -0.12, -0.12)
+    private val siachenRegion = RegionProfile("siachen", "● SIACHEN BORDER", "Siachen Border", true, -0.18, -0.20)
+    private val locRegion = RegionProfile("loc", "● LINE OF CONTROL", "Line of Control", true, -0.08, -0.22)
+
+    private fun resolveRegion(key: String?): RegionProfile {
+        return when (key) {
+            siachenRegion.key -> siachenRegion
+            locRegion.key -> locRegion
+            else -> bengaluruRegion
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Restore dark/light mode preference before inflation
-        val prefs = getSharedPreferences("veer_rakshak_prefs", MODE_PRIVATE)
-        isDarkMode = prefs.getBoolean("dark_mode", true)
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        isDarkMode = prefs.getBoolean(PREF_KEY_DARK_MODE, true)
+        selectedRegion = resolveRegion(prefs.getString(PREF_KEY_REGION, bengaluruRegion.key))
         val desiredNightMode = if (isDarkMode) {
             AppCompatDelegate.MODE_NIGHT_YES
         } else {
@@ -178,6 +204,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         topBarRegion       = findViewById(R.id.topBarRegion)
         micIndicatorDot    = findViewById(R.id.micIndicatorDot)
         micStatusLabel     = findViewById(R.id.micStatusLabel)
+        topBarRegion.text = selectedRegion.badgeLabel
 
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
 
@@ -188,6 +215,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         placeIndex.preloadAsync {
             Handler(Looper.getMainLooper()).post {
                 Log.i(tag, "Offline place index ready.")
+                if (::transcriptionText.isInitialized && selectedRegion.usesDemoOperator) {
+                    transcriptionText.text = getString(R.string.region_demo_mode_message, selectedRegion.displayName)
+                }
             }
         }
         
@@ -231,7 +261,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
                 mapboxMap.setStyle(Style.Builder().fromUri("file://$stylePath")) { _ ->
                     statusText.text = "Offline Tactical Map Active"
                     positionCamera(packageInfo)
-                    currentLocation?.let { drawCurrentLocation(it) }
+                    refreshOperatorPresentation()
                     selectedDestination?.let { drawDestinationMarker(it) }
                     mapboxMap.addOnMapClickListener { point ->
                         handleDestinationSelection(point)
@@ -257,8 +287,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         // Dark mode toggle (top bar icon)
         findViewById<ImageButton>(R.id.btnDarkModeToggle).setOnClickListener {
             isDarkMode = !isDarkMode
-            getSharedPreferences("veer_rakshak_prefs", MODE_PRIVATE)
-                .edit().putBoolean("dark_mode", isDarkMode).apply()
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit().putBoolean(PREF_KEY_DARK_MODE, isDarkMode).apply()
             applyThemeMode(isDarkMode)
             // Recreate to apply theme change
             recreate()
@@ -269,8 +299,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         switchDark?.isChecked = isDarkMode
         switchDark?.setOnCheckedChangeListener { _, checked ->
             isDarkMode = checked
-            getSharedPreferences("veer_rakshak_prefs", MODE_PRIVATE)
-                .edit().putBoolean("dark_mode", isDarkMode).apply()
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit().putBoolean(PREF_KEY_DARK_MODE, isDarkMode).apply()
             applyThemeMode(isDarkMode)
             drawerLayout.closeDrawers()
             recreate()
@@ -278,14 +308,13 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
         // Region items
         findViewById<View?>(R.id.regionBengaluru)?.setOnClickListener {
-            topBarRegion.text = "● BENGALURU"
-            drawerLayout.closeDrawers()
+            applyRegionSelection(bengaluruRegion)
         }
         findViewById<View?>(R.id.regionSiachen)?.setOnClickListener {
-            Toast.makeText(this, getString(R.string.region_not_loaded), Toast.LENGTH_SHORT).show()
+            applyRegionSelection(siachenRegion)
         }
         findViewById<View?>(R.id.regionLoC)?.setOnClickListener {
-            Toast.makeText(this, getString(R.string.region_not_loaded), Toast.LENGTH_SHORT).show()
+            applyRegionSelection(locRegion)
         }
 
         // Sidebar map control buttons
@@ -370,10 +399,45 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         )
     }
 
+    private fun applyRegionSelection(region: RegionProfile) {
+        selectedRegion = region
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putString(PREF_KEY_REGION, region.key)
+            .apply()
+        topBarRegion.text = region.badgeLabel
+        clearRouteOverlay()
+        clearDestinationSelection()
+        hasCenteredOnOperator = false
+        refreshOperatorPresentation()
+        positionCamera(mapPackageInfo ?: return)
+        val message = if (region.usesDemoOperator) {
+            getString(R.string.region_demo_mode_message, region.displayName)
+        } else {
+            getString(R.string.region_live_mode_message, region.displayName)
+        }
+        transcriptionText.text = message
+        statusText.text = if (region.usesDemoOperator) {
+            getString(R.string.region_demo_status, region.displayName)
+        } else {
+            getString(R.string.region_live_status, region.displayName)
+        }
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        drawerLayout.closeDrawers()
+    }
+
+    private fun refreshOperatorPresentation() {
+        val operatorLocation = effectiveOperatorLocation()
+        if (operatorLocation != null) {
+            drawCurrentLocation(operatorLocation)
+            updateLocationStatus(operatorLocation)
+        }
+    }
+
     private fun showDestinationPanel(point: LatLng, label: String) {
         destPanelName.text = label
         destPanelCoords.text = "%.5f°N  %.5f°E".format(point.latitude, point.longitude)
-        val dist = currentLocation?.let {
+        val dist = effectiveOperatorLocation()?.let {
             val result = FloatArray(1)
             Location.distanceBetween(it.latitude, it.longitude, point.latitude, point.longitude, result)
             formatDistance(result[0].toDouble())
@@ -705,7 +769,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     private fun positionCamera(packageInfo: MapPackageInfo) {
-        val location = currentLocation
+        val location = effectiveOperatorLocation()
         val targetLatLng = if (location != null && isInsideOfflineBounds(location)) {
             LatLng(location.latitude, location.longitude)
         } else {
@@ -731,9 +795,9 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     private fun buildRouteRequest(destinationPhrase: String): RouteRequestResult? {
         val packageInfo = mapPackageInfo ?: return null
-        val location = currentLocation
-            ?: return RouteRequestResult(errorMessage = "Waiting for GPS fix before routing.")
-        if (!isInsideOfflineBounds(location)) {
+        val location = effectiveOperatorLocation()
+            ?: return RouteRequestResult(errorMessage = routeUnavailableMessage())
+        if (!selectedRegion.usesDemoOperator && !isInsideOfflineBounds(location)) {
             return RouteRequestResult(
                 errorMessage = "Current GPS is outside the offline mission zone. Move inside the loaded area to calculate a route."
             )
@@ -851,10 +915,13 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
         val bestLast = listOfNotNull(gpsLast, networkLast).maxByOrNull { it.time }
         bestLast?.let {
             currentLocation = it
-            drawCurrentLocation(it)
-            updateLocationStatus(it)
+            refreshOperatorPresentation()
         } ?: run {
-            statusText.text = "Offline Tactical Map Active (Waiting for GPS fix)"
+            statusText.text = if (selectedRegion.usesDemoOperator) {
+                getString(R.string.region_demo_status, selectedRegion.displayName)
+            } else {
+                "Offline Tactical Map Active (Waiting for GPS fix)"
+            }
         }
 
         runCatching {
@@ -884,10 +951,12 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     private fun updateLocationStatus(location: Location) {
-        statusText.text = if (isInsideOfflineBounds(location)) {
-            "Offline Tactical Map Active"
+        statusText.text = if (selectedRegion.usesDemoOperator) {
+            getString(R.string.region_demo_status, selectedRegion.displayName)
+        } else if (isInsideOfflineBounds(location)) {
+            getString(R.string.region_live_status, selectedRegion.displayName)
         } else {
-            "Offline Tactical Map Active (GPS outside mission zone)"
+            getString(R.string.region_outside_status, selectedRegion.displayName)
         }
     }
 
@@ -933,7 +1002,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
 
     private fun updateActiveRouteProgress() {
         val routeCoords = activeRouteCoords ?: return
-        val location = currentLocation ?: return
+        val location = effectiveOperatorLocation() ?: return
         if (routeCoords.size < 2) return
 
         val nearestIndex = findNearestRouteIndex(location, routeCoords)
@@ -957,6 +1026,7 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     private fun maybeRerouteOnDeviation(location: Location) {
+        if (selectedRegion.usesDemoOperator) return
         val routeCoords = activeRouteCoords ?: return
         if (routeCoords.size < 2 || rerouteInProgress) return
         if (!isInsideOfflineBounds(location)) return
@@ -1138,8 +1208,8 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
     }
 
     private fun recenterOnOperator(): Boolean {
-        val location = currentLocation ?: return false
-        if (!isInsideOfflineBounds(location)) {
+        val location = effectiveOperatorLocation() ?: return false
+        if (!selectedRegion.usesDemoOperator && !isInsideOfflineBounds(location)) {
             return false
         }
         mapboxMap?.cameraPosition = CameraPosition.Builder()
@@ -1147,6 +1217,36 @@ class MainActivity : AppCompatActivity(), RecognitionListener {
             .zoom((mapPackageInfo?.maxZoom ?: 15).toDouble().coerceAtMost(16.0))
             .build()
         return true
+    }
+
+    private fun effectiveOperatorLocation(): Location? {
+        val packageInfo = mapPackageInfo
+        return if (selectedRegion.usesDemoOperator && packageInfo != null) {
+            buildDemoOperatorLocation(packageInfo)
+        } else {
+            currentLocation
+        }
+    }
+
+    private fun routeUnavailableMessage(): String {
+        return if (selectedRegion.usesDemoOperator) {
+            "Routing blocked: waiting for offline region package."
+        } else {
+            "Waiting for GPS fix before routing."
+        }
+    }
+
+    private fun buildDemoOperatorLocation(packageInfo: MapPackageInfo): Location {
+        val latSpan = packageInfo.bounds[3] - packageInfo.bounds[1]
+        val lonSpan = packageInfo.bounds[2] - packageInfo.bounds[0]
+        val lat = packageInfo.centerLat + (latSpan * selectedRegion.startLatFactor)
+        val lon = packageInfo.centerLon + (lonSpan * selectedRegion.startLonFactor)
+        return Location("demo-${selectedRegion.key}").apply {
+            latitude = lat
+            longitude = lon
+            accuracy = 3f
+            time = System.currentTimeMillis()
+        }
     }
     
     private fun copyAssetToCache(assetName: String): String {

@@ -1,3 +1,63 @@
 <resources>
-    <string name="app_name">Voice-Controlled GIS</string>
+    <string name="app_name">Veer Rakshak</string>
+    <string name="app_subtitle">OFFLINE · TACTICAL MAP</string>
+    <string name="app_version">v1.0 · AIR-GAPPED BUILD</string>
+
+    <!-- Top bar -->
+    <string name="topbar_title">VEER RAKSHAK</string>
+    <string name="topbar_region_prefix">●</string>
+    <string name="menu_description">Open navigation drawer</string>
+    <string name="dark_mode_toggle">Toggle dark mode</string>
+
+    <!-- Sidebar sections -->
+    <string name="drawer_section_regions">REGIONS</string>
+    <string name="drawer_section_display">DISPLAY</string>
+    <string name="drawer_section_controls">MAP CONTROLS</string>
+
+    <!-- Regions -->
+    <string name="region_bengaluru">Bengaluru Zone</string>
+    <string name="region_bengaluru_sub">15 km offline tile pack</string>
+    <string name="region_siachen">Siachen Border</string>
+    <string name="region_siachen_sub">Demo routing mode on current pack</string>
+    <string name="region_loc">Line of Control</string>
+    <string name="region_loc_sub">Demo routing mode on current pack</string>
+
+    <!-- Display toggles -->
+    <string name="toggle_dark_mode">Tactical Dark Mode</string>
+    <string name="toggle_operator_marker">Show Operator Marker</string>
+
+    <!-- Map controls -->
+    <string name="control_recenter">Recenter on Operator</string>
+    <string name="control_clear_route">Clear Route</string>
+    <string name="control_clear_destination">Clear Destination</string>
+
+    <!-- Status / route card -->
+    <string name="route_card_label">ACTIVE ROUTE</string>
+    <string name="route_remaining">Remaining</string>
+    <string name="route_total">Total</string>
+    <string name="route_eta">ETA</string>
+    <string name="route_destination">Destination</string>
+    <string name="route_status_on">ON ROUTE</string>
+    <string name="route_status_off">OFF ROUTE</string>
+    <string name="route_status_rerouting">REROUTING…</string>
+
+    <!-- Destination info panel -->
+    <string name="dest_panel_label">OBJECTIVE</string>
+    <string name="dest_panel_route_btn">ROUTE HERE</string>
+    <string name="dest_panel_clear_btn">CLEAR</string>
+    <string name="dest_panel_distance_label">Distance from position</string>
+
+    <!-- Voice card -->
+    <string name="voice_card_label">VOICE COMMAND FEED</string>
+    <string name="voice_listening">Listening for tactical commands…</string>
+    <string name="voice_examples">Try: route to objective  ·  clear route  ·  recenter on me</string>
+
+    <!-- Misc -->
+    <string name="region_not_loaded">Region not yet loaded. Coming soon.</string>
+    <string name="region_demo_mode_message">%1$s selected. Demo routing mode is active using a simulated operator inside the loaded map pack.</string>
+    <string name="region_live_mode_message">%1$s selected. Live GPS routing mode is active.</string>
+    <string name="region_demo_status">Demo Region Active · %1$s</string>
+    <string name="region_live_status">Offline Tactical Map Active · %1$s</string>
+    <string name="region_outside_status">Offline Tactical Map Active · %1$s (GPS outside mission zone)</string>
+    <string name="close_description">Close panel</string>
 </resources>
