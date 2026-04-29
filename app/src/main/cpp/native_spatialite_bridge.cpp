@@ -32,6 +32,18 @@ bool tryLoadLibrary(const char* library_name) {
     return true;
 }
 
+bool tryLoadWrapperLibrary(const char* library_name) {
+    g_spatialite_handle = dlopen(library_name, RTLD_NOW | RTLD_LOCAL);
+    if (g_spatialite_handle == nullptr) {
+        __android_log_print(ANDROID_LOG_WARN, kTag, "dlopen failed for %s: %s", library_name, dlerror());
+        return false;
+    }
+
+    g_driver_status = std::string("Loaded ") + library_name + " wrapper library.";
+    __android_log_print(ANDROID_LOG_INFO, kTag, "%s", g_driver_status.c_str());
+    return true;
+}
+
 void ensureSpatialiteChecked() {
     if (g_checked_spatialite) return;
     g_checked_spatialite = true;
@@ -42,6 +54,11 @@ void ensureSpatialiteChecked() {
     }
 
     if (tryLoadLibrary("mod_spatialite.so")) {
+        g_has_spatialite = true;
+        return;
+    }
+
+    if (tryLoadWrapperLibrary("libandroid_spatialite.so")) {
         g_has_spatialite = true;
         return;
     }
