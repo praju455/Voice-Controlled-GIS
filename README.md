@@ -395,3 +395,7 @@ The next engineering phase moves beyond the roadmap into:
 - deeper tactical spatial overlays and analysis visualization
 
 *Maintainer Note: Built as a hackathon proof-of-concept for secure offline tactical mapping and navigation.*
+
+---
+
+*Last updated: May 2026*
