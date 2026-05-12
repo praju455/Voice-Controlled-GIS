@@ -17,6 +17,15 @@ data class TacticalIntent(
     val unit: String
 )
 
+/**
+ * Core engine responsible for interpreting voice commands into tactical intents.
+ * It uses a multi-stage approach:
+ * 1. High-priority deterministic Regex matching for common phrases.
+ * 2. TFLite-based intent classification for complex natural language patterns.
+ * 3. Implicit destination matching for simple location-based phrases.
+ *
+ * @property context The application context used for accessing assets and SharedPreferences.
+ */
 class SpatialIntelligenceEngine(private val context: Context) {
     private val tag = "SpatialIntelligence"
     private val classifierAssetPath = "models/nlp_intent.tflite"
