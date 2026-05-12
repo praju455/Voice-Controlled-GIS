@@ -136,14 +136,14 @@ class SpatialIntelligenceEngine(private val context: Context) {
             return TacticalIntent(action = "clear_hazards", entity = "hazards", distance = 0, unit = "")
         }
 
-        // "mark hazard here" / "hazard zone here" / "mark danger here"
-        val regexMarkHazard = Regex("(mark|add|place|set)\\s+(a\\s+)?(hazard|danger|threat)(?:\\s+zone)?(?:\\s+here)?")
+        // "mark hazard here" / "hazard zone here" / "mark danger here" / "danger area"
+        val regexMarkHazard = Regex("(mark|add|place|set|identify)\\s+(a\\s+)?(hazard|danger|threat|warning)(?:\\s+zone|\\s+area)?(?:\\s+here)?")
         if (regexMarkHazard.containsMatchIn(lowerInput)) {
             return TacticalIntent(action = "mark_hazard", entity = "HOSTILE_AREA", distance = 200, unit = "m")
         }
 
-        // "hostile area here" / "hostile zone" / "enemy zone"
-        val regexHostile = Regex("(hostile|enemy|threat|hostile\\s+area|hostile\\s+zone|enemy\\s+territory)(?:\\s+here)?")
+        // "hostile area here" / "hostile zone" / "enemy zone" / "threat location"
+        val regexHostile = Regex("(hostile|enemy|threat|hostile\\s+area|hostile\\s+zone|enemy\\s+territory|threat\\s+location)(?:\\s+here)?")
         if (regexHostile.containsMatchIn(lowerInput)) {
             return TacticalIntent(action = "mark_hazard", entity = "HOSTILE_AREA", distance = 200, unit = "m")
         }
