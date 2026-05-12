@@ -139,6 +139,14 @@ class TacticalRouterEngine(context: Context, private val graphCacheDir: String) 
             return null
         }
 
+        // Basic coordinate validation
+        if (fromLat !in -90.0..90.0 || toLat !in -90.0..90.0 || 
+            fromLon !in -180.0..180.0 || toLon !in -180.0..180.0) {
+            lastError = "Invalid coordinates provided for routing"
+            Log.e(tag, lastError!!)
+            return null
+        }
+
         try {
             val req = GHRequest(fromLat, fromLon, toLat, toLon)
                 .setProfile("car")
