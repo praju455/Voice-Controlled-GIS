@@ -5,3 +5,4 @@ Thanks to everyone who has contributed to this project!
 | Name | GitHub |
 |------|--------|
 | praju455 | [@praju455](https://github.com/praju455) |
+| Harish N | [harish-n](https://github.com/harish-n) |
